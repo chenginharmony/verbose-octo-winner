@@ -535,22 +535,100 @@ async function initialDiscovery() {
   console.log(`   Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')}\n`);
 }
 
-// Background Discovery Poller (every 45s)
+// Dynamic Background Discovery Engine (Active GeckoTerminal Feed + On-chain Multicall)
+async function fetchTrendingBaseTokens() {
+  const discoveredMap = new Map();
+  try {
+    const endpoints = [
+      'https://api.geckoterminal.com/api/v2/networks/base/trending_pools',
+      'https://api.geckoterminal.com/api/v2/networks/base/new_pools'
+    ];
+    for (const url of endpoints) {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!data.data || !Array.isArray(data.data)) continue;
+
+      for (const pool of data.data) {
+        const baseAddr = pool.relationships?.base_token?.data?.id?.replace('base_', '');
+        const quoteAddr = pool.relationships?.quote_token?.data?.id?.replace('base_', '');
+        const name = pool.attributes?.name || '';
+        const parts = name.split(' / ');
+
+        if (baseAddr && ethers.isAddress(baseAddr) && baseAddr.toLowerCase() !== WETH.toLowerCase()) {
+          discoveredMap.set(baseAddr.toLowerCase(), parts[0]?.replace(/\s.*$/, '') || 'TOKEN');
+        }
+        if (quoteAddr && ethers.isAddress(quoteAddr) && quoteAddr.toLowerCase() !== WETH.toLowerCase()) {
+          discoveredMap.set(quoteAddr.toLowerCase(), parts[1]?.replace(/\s.*$/, '') || 'TOKEN');
+        }
+      }
+    }
+  } catch (e) {}
+  return Array.from(discoveredMap.entries()).map(([addr, symbol]) => ({ addr, symbol }));
+}
+
 function startBackgroundDiscovery() {
-  console.log('📡 Background Discovery Poller Active (interval: 45s)...');
+  console.log('📡 Dynamic Market Feed Active (Scanning trending & new tokens every 45s)...');
+  
   setInterval(async () => {
     try {
-      const currentBlock = await provider.getBlockNumber();
-      if (currentBlock <= lastScannedBlock) return;
+      const candidates = await fetchTrendingBaseTokens();
+      const newTokens = candidates.filter(c => !discoveredPairs[c.addr.toLowerCase()]);
 
-      const fromBlock = lastScannedBlock + 1;
-      for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
-        await scanFactoryLogs(dex, factoryAddr, fromBlock, currentBlock);
+      if (newTokens.length > 0) {
+        const calls = [];
+        const meta = [];
+
+        for (const token of newTokens) {
+          for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
+            if (dex === 'Aerodrome') {
+              calls.push({
+                target: factoryAddr,
+                allowFailure: true,
+                callData: aeroInterface.encodeFunctionData('getPool', [WETH, token.addr, false])
+              });
+            } else {
+              calls.push({
+                target: factoryAddr,
+                allowFailure: true,
+                callData: factoryInterface.encodeFunctionData('getPair', [WETH, token.addr])
+              });
+            }
+            meta.push({ dex, tokenAddr: token.addr, symbol: token.symbol });
+          }
+        }
+
+        const results = await multicallContract.aggregate3(calls);
+        let newlyAddedCount = 0;
+
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          const m = meta[i];
+          if (r.success && r.returnData !== '0x') {
+            const decoded = m.dex === 'Aerodrome'
+              ? aeroInterface.decodeFunctionResult('getPool', r.returnData)
+              : factoryInterface.decodeFunctionResult('getPair', r.returnData);
+            const pairAddr = decoded[0];
+            if (pairAddr && pairAddr !== ethers.ZeroAddress) {
+              if (!discoveredPairs[m.tokenAddr]) discoveredPairs[m.tokenAddr] = {};
+              discoveredPairs[m.tokenAddr][m.dex] = {
+                pairAddr,
+                isWeth0: true,
+                symbol: m.symbol
+              };
+            }
+          }
+        }
+
+        const beforePools = activeArbitragePairs.length;
+        updateIntersectionMatrix();
+        const afterPools = activeArbitragePairs.length;
+
+        if (afterPools > beforePools) {
+          saveRegistry();
+          console.log(`\n✨ [NEW TOKENS DISCOVERED] Expanded candidate universe to ${activeArbitragePairs.length} pools across ${Object.keys(discoveredPairs).length} tokens!`);
+        }
       }
-
-      lastScannedBlock = currentBlock;
-      updateIntersectionMatrix();
-      saveRegistry();
     } catch (err) {}
   }, 45000);
 }
@@ -576,9 +654,6 @@ async function startHotLoop() {
 
       if (activeArbitragePairs.length === 0) {
         process.stdout.write('.');
-        if (currentBlock % 5 === 0) {
-          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).length} DEXs | 0 Candidates`);
-        }
         return;
       }
 
@@ -599,7 +674,7 @@ async function startHotLoop() {
         console.log(`Spread:       ${bestOpp.spread.toFixed(2)}%`);
         console.log(`Input:        $${toUsd(bestOpp.input)} (${ethers.formatEther(bestOpp.input)} WETH)`);
         console.log(`Expected Out: $${toUsd(bestOpp.outWeth)} (${ethers.formatEther(bestOpp.outWeth)} WETH)`);
-        console.log(`Gross Profit: +$${toUsd(bestOpp.grossProfit)}`);
+        console.log(`Gross Profit: +$${toUsd(bestGrossProfit || bestOpp.grossProfit)}`);
         console.log(`Gas Cost:    -$${toUsd(bestOpp.gasCost)}`);
         console.log(`NET PROFIT:   +$${toUsd(bestOpp.netProfit)}`);
         console.log(`═════════════════════════════════════════════════════════════════`);
@@ -667,17 +742,24 @@ async function startHotLoop() {
       } else {
         process.stdout.write('.');
         if (currentBlock % 5 === 0) {
-          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')} | Candidates: ${activeArbitragePairs.length} pools`);
-          console.log(`  🔬 Full Opportunity Simulation & Execution Decisions:`);
+          const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
+          const notableEvals = evaluations.filter(e => e.spread > 0.3 || (e.details && e.details.grossProfit > 0n));
+          const topSpread = evaluations.reduce((max, e) => e.spread > (max.spread || 0) ? e : max, {});
+
+          const topStr = topSpread.symbol ? `${topSpread.symbol} (${topSpread.spread.toFixed(2)}%)` : 'None (>0.3%)';
+          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: 5 DEXs | Monitored: ${uniqueTokens.length} tokens (${activeArbitragePairs.length} pools) | Top Spread: ${topStr}`);
           
-          for (const ev of evaluations) {
-            if (ev.details) {
-              const inStr = `$${toUsd(ev.details.input)}`;
-              const outStr = `$${toUsd(ev.details.outWeth)}`;
-              const netStr = (ev.details.netProfit >= 0n ? '+' : '') + `$${toUsd(ev.details.netProfit)}`;
-              console.log(`  🪙 ${ev.symbol.padEnd(8)} | Spread: ${ev.spread.toFixed(2).padStart(5)}% (${ev.buyDex} ➡️ ${ev.sellDex}) | Sim: In ${inStr} ➡️ Out ${outStr} | Net: ${netStr} | [${ev.status}: ${ev.reason}]`);
-            } else {
-              console.log(`  🪙 ${ev.symbol.padEnd(8)} | [${ev.status}: ${ev.reason}]`);
+          if (notableEvals.length > 0) {
+            console.log(`  🔬 Active Price Dislocation Traces:`);
+            for (const ev of notableEvals) {
+              if (ev.details) {
+                const inStr = `$${toUsd(ev.details.input)}`;
+                const outStr = `$${toUsd(ev.details.outWeth)}`;
+                const netStr = (ev.details.netProfit >= 0n ? '+' : '') + `$${toUsd(ev.details.netProfit)}`;
+                console.log(`  🪙 ${ev.symbol.padEnd(8)} | Spread: ${ev.spread.toFixed(2).padStart(5)}% (${ev.buyDex} ➡️ ${ev.sellDex}) | Sim: In ${inStr} ➡️ Out ${outStr} | Net: ${netStr} | [${ev.status}: ${ev.reason}]`);
+              } else {
+                console.log(`  🪙 ${ev.symbol.padEnd(8)} | Spread: ${ev.spread.toFixed(2).padStart(5)}% | [${ev.status}: ${ev.reason}]`);
+              }
             }
           }
         }

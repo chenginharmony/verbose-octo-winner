@@ -308,12 +308,14 @@ async function main() {
       const onChainBal = await tokenContract.balanceOf(wallet.address).catch(() => 0n);
 
       if (onChainBal === 0n) {
-        // Token is no longer held, close position cleanly
-        pos.status = 'CLOSED';
-        activePositions.delete(tokLower);
-        savePersistedPositions(activePositions);
-        inFlightTokens.delete(tokLower);
-        GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock
+        if (pos.ticksHeld > 5) {
+          // Token is no longer held, close position cleanly
+          pos.status = 'CLOSED';
+          activePositions.delete(tokLower);
+          savePersistedPositions(activePositions);
+          inFlightTokens.delete(tokLower);
+          GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock
+        }
         return;
       }
 
@@ -714,6 +716,7 @@ async function main() {
         highestObservedEth: entryEth,
         status: 'OPEN'
       });
+      savePersistedPositions(activePositions);
 
       // Add to Lifetime Sniped Tokens Registry
       lifetimeSnipedTokens.add(otherTokenLower);

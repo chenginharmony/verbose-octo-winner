@@ -71,7 +71,7 @@ function getKeyboard() {
   return {
     inline_keyboard: [
       [
-        { text: isEngineRunning ? '🛑 Stop Sniper' : '🚀 Start Sniper', callback_data: 'toggle_engine' },
+        { text: isEngineRunning ? '🛑 Stop Arb Engine' : '🚀 Start Arb Engine', callback_data: 'toggle_engine' },
         { text: '📊 Dashboard', callback_data: 'status' }
       ],
       [
@@ -121,15 +121,14 @@ async function startLiveRadar(chatId) {
   if (liveTickerInterval) clearInterval(liveTickerInterval);
 
   const stats = await getStats();
-  const initialText = `🍣 *SUSHIBREAD PRO LIVE RADAR ⚡*\n────────────────────────────\n` +
+  const initialText = `🍣 *ATOMIC ARB PRO LIVE RADAR ⚡*\n────────────────────────────\n` +
     `📡 *Base Block:* #Initializing...\n` +
-    `🔄 *Status:* 🟢 Decoupled Async Ingestion Active (<50ms)\n` +
-    `💧 *Liquidity Window:* 0.05 to 300.0 WETH\n` +
-    `🛡️ *Honeypot Shield:* 2-Way Static Simulation Active\n` +
+    `🔄 *Status:* 🟢 DEX Cross-Scanner Active\n` +
+    `🛡️ *Atomic Shield:* Execution fully protected via Bread.sol\n` +
     `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
     `🏦 *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
     `────────────────────────────\n` +
-    `⚡ *Status:* 🟢 Worker Pool Running...`;
+    `⚡ *Status:* 🟢 Arbitrage Engine Running...`;
 
   const msg = await telegramCall('sendMessage', {
     chat_id: chatId,
@@ -158,16 +157,13 @@ async function startLiveRadar(chatId) {
         posText = posKeys.map(k => `${activePos[k].symbol || 'TOKEN'} (${activePos[k].blocksHeld || 0} blks)`).join(', ');
       }
 
-      const radarText = `🍣 *SUSHIBREAD PRO LIVE RADAR ⚡*\n────────────────────────────\n` +
-        `📡 *Base Block:* \`#${liveBlockNumber}\` (Latency: \`${liveDetectLatency}ms\` | Ingest: \`${liveIngestDuration}ms\`)\n` +
-        `🔄 *Throughput:* \`${liveSwapsCount} swaps\` (\`${liveSwapRate}/s\` | Queue: \`${liveCandidateQueue}\`)\n` +
-        `🔥 *Live Action:* ${latestAction}\n` +
-        `🎯 *Open Positions:* ${posText}\n` +
+      const radarText = `🍣 *ATOMIC ARB LIVE RADAR ⚡*\n────────────────────────────\n` +
+        `📡 *Latest Target:* \`${latestAction}\`\n` +
         `💰 *Trading ETH:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
-        `🛡️ *Sizing Engine:* 🧠 AI Dynamic Scoring (PRIME/STANDARD/DEGEN)\n` +
+        `🛡️ *Routing:* BaseSwap ↔️ SwapBased\n` +
         `────────────────────────────\n` +
-        `⚡ *Status:* 🟢 Async Producer/Consumer Active`;
+        `⚡ *Status:* 🟢 Engine Actively Scanning`;
 
       await telegramCall('editMessageText', {
         chat_id: chatId,
@@ -187,7 +183,7 @@ function startEngine(chatId) {
   }
 
   isEngineRunning = true;
-  const scriptPath = path.join(process.cwd(), 'scripts', 'base_atomic_sniper.js');
+  const scriptPath = path.join(process.cwd(), 'scripts', 'atomic_arbitrage.js');
   engineProcess = spawn('node', [scriptPath], {
     cwd: process.cwd(),
     env: { ...process.env, TELEGRAM_CHAT_ID: chatId.toString() },
@@ -201,58 +197,32 @@ function startEngine(chatId) {
     process.stdout.write(output);
     addLog(output);
 
-    if (output.includes('⏳ Block #')) {
-      const match = output.match(/Block #(\d+) \| Ingest: (\d+)ms \| Latency: (\d+)ms \| 🔄 Swaps: (\d+) \(([0-9.]+)\/s\) \| Q\(H\/N\): (\d+)\/(\d+) \| Open Pos: (\d+)/);
+    if (output.includes('[ARB SCAN]')) {
+      const match = output.match(/Block #(\d+) \| Token: (.*)/);
       if (match) {
-        liveBlockNumber = match[1];
-        liveIngestDuration = match[2];
-        liveDetectLatency = match[3];
-        liveSwapsCount = match[4];
-        liveSwapRate = match[5];
-        liveCandidateQueue = `${match[6]}/${match[7]}`;
+        latestAction = `Block #${match[1]} | Scanned ${match[2]}`;
       }
     }
 
-    if (output.includes('[SNIPE OPPORTUNITY EXECUTED]') || output.includes('🚀 [NEW BASE LAUNCH DETECTED]')) {
-      const match = output.match(/Pair: WETH \/ ([A-Za-z0-9_$]+)/);
-      latestAction = `🚀 Sniping *${match ? match[1] : 'TOKEN'}* (Dynamic Size)`;
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `🚀 *[BASE SNIPE OPPORTUNITY EXECUTED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
-        parse_mode: 'Markdown'
-      });
-    } else if (output.includes('[LIVE TRACKER]')) {
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `📊 *[LIVE POSITION UPDATE]*\n\`\`\`\n${output.trim().slice(0, 300)}\n\`\`\``,
-        parse_mode: 'Markdown'
-      });
-    } else if (output.includes('🎯 TAKE-PROFIT HIT') || output.includes('🔒 TRAILING PROFIT LOCK')) {
-      latestAction = `🏆 Took Profit (+3.5%+) & Swept to USDC!`;
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `🏆 *[PROFIT SECURED & SWEPT TO USDC]* 💰\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
-        parse_mode: 'Markdown'
-      });
-    } else if (output.includes('🛑 STOP-LOSS EXIT')) {
-      latestAction = `🛑 Stop-loss executed safely`;
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `🛑 *[STOP-LOSS EXIT]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
-        parse_mode: 'Markdown'
-      });
-    } else if (output.includes('🏦 [PROFIT VAULT]')) {
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `🏦 *[USDC VAULT SWEEP]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
-        parse_mode: 'Markdown'
-      });
-    } else if (output.includes('[HONEYPOT BLOCKED]')) {
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `🛡️ *[HONEYPOT SHIELD ACTIVATED]*\n\`\`\`\n${output.trim().slice(0, 300)}\n\`\`\`\n💰 *Capital Protected:* $0.00 spent.`,
-        parse_mode: 'Markdown'
-      });
+    if (output.includes('[ARB CANDIDATE]')) {
+      const match = output.match(/\[ARB CANDIDATE\] Token: (.*) \| Route: (.*) \| Input: (.*) \| Expected Profit: (.*)/);
+      if (match) {
+        telegramCall('sendMessage', {
+          chat_id: chatId,
+          text: `🚀 *[ARBITRAGE OPPORTUNITY FOUND]*\n────────────────────────────\n🪙 *Token:* \`${match[1]}\`\n🛣️ *Route:* \`${match[2]}\`\n💰 *Input Size:* \`${match[3]}\`\n📈 *Expected Net Profit:* \`${match[4]}\`\n────────────────────────────\n⚡ Attempting Atomic Execution...`,
+          parse_mode: 'Markdown'
+        });
+      }
+    } else if (output.includes('[ARB MINED]')) {
+      const match = output.match(/\[ARB MINED\] Block #(.*) \| Token: (.*) \| Profit: (.*) \| Tx: (.*)/);
+      if (match) {
+        telegramCall('sendMessage', {
+          chat_id: chatId,
+          text: `💰 *[ARBITRAGE SECURED ON-CHAIN]*\n────────────────────────────\n📡 *Block:* \`#${match[1]}\`\n🪙 *Token:* \`${match[2]}\`\n📈 *Net Profit Added:* \`${match[3]}\`\n🔗 [View Tx on Explorer](https://basescan.org/tx/${match[4].trim()})\n────────────────────────────`,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
+      }
     }
   });
 

@@ -1,334 +1,252 @@
-/**
- * atomic_arbitrage.js
- *
- * ATOMIC MEV & NEW LIQUIDITY ENGINE — ROBINHOOD CHAIN (4663)
- *
- * Strategy:
- * 1. Real-Time PairCreated / Mint Detection: Listens to new meme token deployments and liquidity additions.
- * 2. Floor Entry: When fresh WETH liquidity is added, acquires an initial micro-position at base valuation.
- * 3. Atomic Target Take-Profit: Sets automatic take-profit targets (+15% to +50%) and exits the moment
- *    subsequent buy volume hits the pool.
- * 4. Multi-Pool Arbitrage: Continuously checks cross-pool pricing whenever trades occur.
- * 5. Revert Protection: Uses amountOutMin constraints on all Router swaps to guarantee atomic execution.
- */
-
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const RPC     = process.env.ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com';
-const PK      = process.env.ROBINHOOD_BOT_PRIVATE_KEY;
-const ROUTER  = '0x89e5db8b5aa49aa85ac63f691524311aeb649eba';
-const FACTORY = '0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f';
-const WETH    = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73'.toLowerCase();
-const ETH_USD = 1882.5;
+const RPC = process.env.BASE_RPC_URL || 'https://developer-access-mainnet.base.org';
+const provider = new ethers.JsonRpcProvider(RPC, 8453);
 
-// ABIs
-const FACTORY_ABI = [
-  'event PairCreated(address indexed token0, address indexed token1, address pair, uint)',
-  'function allPairsLength() view returns (uint)',
-  'function getPair(address tokenA, address tokenB) view returns (address pair)',
+const WETH = '0x4200000000000000000000000000000000000006';
+
+const FACTORIES = {
+  BaseSwap: '0xF9D5D5B20Ac1A54b4138eBeB2b31131c03eEeeac',
+  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300'
+};
+
+const TOKENS = {
+  TOSHI: '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4',
+  DEGEN: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed',
+  BRETT: '0x532f27101965dd16442E59d40670FaF5eBB142E4',
+  HIGHER: '0x0578d8A44db98B23BF096A382e016e29a5Ce0ffe',
+  AERO: '0x940181a94A35A4569E4529A3CDfB74e38FD98631'
+};
+
+const BREAD_ROUTER = process.env.BREAD_ROUTER_ADDRESS;
+const PK = process.env.BASE_BOT_PRIVATE_KEY || process.env.ROBINHOOD_BOT_PRIVATE_KEY;
+const wallet = new ethers.Wallet(PK, provider);
+const BREAD_ABI = [
+  'function executeArbitrage(address pool1, address pool2, uint256 amountIn, uint256 amountOut1, uint256 amountOut2, bool zeroForOne1, bool zeroForOne2, uint256 minProfit) external returns (uint256)'
 ];
+const breadContract = new ethers.Contract(BREAD_ROUTER, BREAD_ABI, wallet);
+
+const FACTORY_ABI = ['function getPair(address, address) view returns (address)'];
 const PAIR_ABI = [
-  'event Mint(address indexed sender, uint amount0, uint amount1)',
-  'event Swap(address indexed sender, uint amount0In, uint amount1In, uint amount0Out, uint amount1Out, address indexed to)',
-  'function getReserves() view returns (uint112 r0, uint112 r1, uint32 blockTimestampLast)',
+  'function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)',
   'function token0() view returns (address)',
-  'function token1() view returns (address)',
-];
-const ROUTER_ABI = [
-  'function swapExactETHForTokensSupportingFeeOnTransferTokens(uint amountOutMin, address[] path, address to, uint deadline) payable',
-  'function swapExactTokensForETHSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline)',
-  'function getAmountsOut(uint amountIn, address[] path) view returns (uint[])',
-];
-const ERC20_ABI = [
-  'function symbol() view returns (string)',
-  'function balanceOf(address) view returns (uint)',
-  'function allowance(address,address) view returns (uint)',
-  'function approve(address,uint) returns (bool)',
+  'function token1() view returns (address)'
 ];
 
-const GAS_RESERVE_ETH = ethers.parseEther('0.00005');
-const SWAP_TOPIC = ethers.id('Swap(address,uint256,uint256,uint256,uint256,address)');
-const MINT_TOPIC = ethers.id('Mint(address,uint256,uint256)');
-const PAIR_CREATED_TOPIC = ethers.id('PairCreated(address,address,address,uint256)');
+const pairsData = []; // { symbol, dex, pairAddr, isWeth0 }
 
-async function main() {
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('⚡ ATOMIC MEV & NEW LIQUIDITY ARBITRAGE ENGINE');
-  console.log('   Robinhood Chain Mainnet (Chain ID 4663)');
-  console.log('   Strategy: Floor Liquidity Sniping + Atomic Take-Profit Exits');
-  console.log('═══════════════════════════════════════════════════════════════\n');
+// Estimated gas cost for the Bread.sol executeArbitrage call (approx 160k gas)
+// On Base, execution + L1 data fee usually ends up around $0.005 - $0.01
+// We will dynamically estimate using current baseFee
+async function getGasEstimateEth() {
+  const block = await provider.getBlock('latest');
+  const baseFee = block?.baseFeePerGas || 1000000n;
+  const gasLimit = 180000n;
+  return baseFee * gasLimit;
+}
 
-  if (!PK) {
-    console.error('❌ ROBINHOOD_BOT_PRIVATE_KEY is missing in .env');
-    process.exit(1);
-  }
+function getAmountOut(amountIn, reserveIn, reserveOut) {
+  if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return 0n;
+  const amountInWithFee = amountIn * 997n; // 0.3% fee
+  const numerator = amountInWithFee * reserveOut;
+  const denominator = (reserveIn * 1000n) + amountInWithFee;
+  return numerator / denominator;
+}
 
-  const provider = new ethers.JsonRpcProvider(RPC, 4663);
-  const wallet   = new ethers.Wallet(PK, provider);
-  const router   = new ethers.Contract(ROUTER, ROUTER_ABI, wallet);
-  const factory  = new ethers.Contract(FACTORY, FACTORY_ABI, provider);
+function toUsd(ethWei) {
+  return (Number(ethers.formatEther(ethWei)) * 1882.5).toFixed(4);
+}
 
-  const balance = await provider.getBalance(wallet.address);
-  console.log(`💼 Bot Wallet:  ${wallet.address}`);
-  console.log(`💰 Balance:     ${ethers.formatEther(balance)} ETH (~$${(Number(ethers.formatEther(balance)) * ETH_USD).toFixed(3)})\n`);
-
-  // Active positions tracker: tokenAddress -> { pairAddress, symbol, entryEth, tokenBalance, targetEthOut }
-  const activePositions = new Map();
-  const approvedTokens = new Set();
-  const poolCache = new Map();
-
-  let lastBlock = await provider.getBlockNumber();
-  console.log(`📡 Stream started at block #${lastBlock}...`);
-  console.log(`⏳ Watching for PairCreated, Mint (New Liquidity), and Swap orderflow...\n`);
-
-  async function ensureApproval(tokenAddress, symbol) {
-    if (approvedTokens.has(tokenAddress.toLowerCase())) return;
-    const tok = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
-    try {
-      const allow = await tok.allowance(wallet.address, ROUTER);
-      if (allow < ethers.MaxUint256 / 2n) {
-        process.stdout.write(`  🔑 Auto-approving ${symbol}... `);
-        const tx = await tok.approve(ROUTER, ethers.MaxUint256, { gasLimit: 70000n });
-        await tx.wait(1);
-        console.log('✅ Approved');
-      }
-      approvedTokens.add(tokenAddress.toLowerCase());
-    } catch {}
-  }
-
-  // Check exit conditions for all active positions
-  async function checkActiveExits() {
-    for (const [tokenAddr, pos] of activePositions.entries()) {
+async function setupPairs() {
+  console.log('🔄 Initializing Target Pools...');
+  for (const [symbol, tokenAddr] of Object.entries(TOKENS)) {
+    for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
       try {
-        const wethChk = ethers.getAddress(WETH);
-        const tokChk = ethers.getAddress(tokenAddr);
-        const amountsOut = await router.getAmountsOut(pos.tokenBalance, [tokChk, wethChk]);
-        const currentEthOut = amountsOut[1];
-        const gainPercent = Number(currentEthOut - pos.entryEth) / Number(pos.entryEth) * 100;
-
-        pos.blocksHeld = (pos.blocksHeld || 0) + 1;
-        pos.peakGainPercent = Math.max(pos.peakGainPercent || 0, gainPercent);
-
-        console.log(`  📈 Position [${pos.symbol}]: Current Value = ${ethers.formatEther(currentEthOut)} ETH (${gainPercent >= 0 ? '+' : ''}${gainPercent.toFixed(1)}%) | Peak: +${pos.peakGainPercent.toFixed(1)}% | Held: ${pos.blocksHeld} blocks`);
-
-        // Dynamic Exit Triggers:
-        // 1. Take Profit: Reached +3.5% or higher (covers gas + DEX fees with net profit!)
-        // 2. Trailing Profit Lock: Was up >+3.0% and retraced by 1.5%
-        // 3. Fast Flip Timeout: Held for 4+ blocks and is positive (>= +1.5%)
-        // 4. Emergency Stop: Dropped below -15%
-        const shouldTakeProfit = gainPercent >= 3.5;
-        const shouldTrailingLock = pos.peakGainPercent >= 3.0 && gainPercent <= (pos.peakGainPercent - 1.5);
-        const shouldTimeoutExit = pos.blocksHeld >= 4 && gainPercent >= 1.5;
-        const shouldStopLoss = gainPercent <= -15.0 && pos.blocksHeld >= 2;
-
-        if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutExit || shouldStopLoss) {
-          if (pos.isExiting) continue;
-          pos.isExiting = true;
-
-          const reason = shouldTakeProfit ? `🎯 TAKE-PROFIT (+${gainPercent.toFixed(1)}%)`
-            : shouldTrailingLock ? `🔒 TRAILING PROFIT LOCK (+${gainPercent.toFixed(1)}%)`
-            : shouldTimeoutExit ? `⏱️ TIMEOUT FLIP (+${gainPercent.toFixed(1)}%)`
-            : `🛑 STOP-LOSS (${gainPercent.toFixed(1)}%)`;
-
-          console.log(`\n${reason} for ${pos.symbol}! Broadcasting Atomic Exit...`);
-          await ensureApproval(tokChk, pos.symbol);
-
-          const block = await provider.getBlock('latest');
-          const baseFee = block?.baseFeePerGas || 20000000n;
-          const maxPrio = 2000000n;
-          const maxFee = (baseFee * 150n) / 100n + maxPrio;
-          const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
-
-          // For profit exits, guarantee at least 95% of current value; for stop loss accept market
-          const minEthOut = shouldStopLoss ? 1n : (currentEthOut * 95n) / 100n;
-
-          const tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
-            pos.tokenBalance,
-            minEthOut,
-            [tokChk, wethChk],
-            wallet.address,
-            deadline,
-            { gasLimit: 200000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
-          );
-          console.log(`   Tx Hash: ${tx.hash}`);
-          const receipt = await tx.wait(1);
-          console.log(`   ✅ Exit Mined in Block #${receipt.blockNumber}!`);
-          console.log(`   🔗 https://robinhoodchain.blockscout.com/tx/${tx.hash}`);
-
-          activePositions.delete(tokenAddr);
-          const newBal = await provider.getBalance(wallet.address);
-          console.log(`💰 Updated Wallet Balance: ${ethers.formatEther(newBal)} ETH\n`);
+        const factory = new ethers.Contract(factoryAddr, FACTORY_ABI, provider);
+        const pairAddr = await factory.getPair(WETH, tokenAddr);
+        if (pairAddr && pairAddr !== ethers.ZeroAddress) {
+          const pair = new ethers.Contract(pairAddr, PAIR_ABI, provider);
+          const t0 = await pair.token0();
+          pairsData.push({
+            symbol,
+            dex,
+            pairAddr,
+            isWeth0: t0.toLowerCase() === WETH.toLowerCase()
+          });
         }
       } catch (e) {
-        if (pos) pos.isExiting = false;
+        console.log(`Failed to fetch pair for ${symbol} on ${dex}`);
       }
     }
   }
+  console.log(`✅ Loaded ${pairsData.length} Liquidity Pools.`);
+}
 
-  let isEntering = false;
+async function scan() {
+  let lastBlock = 0;
+  console.log('\n📡 [ARB SCAN] Simulation Engine Online. Waiting for blocks...\n');
 
-  // Core pair evaluation and entry logic
-  async function evaluateAndEnterPair(pairAddress, t0, t1) {
-    if (isEntering) return;
-    try {
-      const hasWeth = t0.toLowerCase() === WETH || t1.toLowerCase() === WETH;
-      if (!hasWeth) return;
-
-      const wethIs0 = t0.toLowerCase() === WETH;
-      const otherToken = wethIs0 ? t1 : t0;
-
-      // Don't re-enter an already active position
-      if (activePositions.has(otherToken.toLowerCase())) return;
-
-      const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
-      const [r0, r1] = await pair.getReserves();
-      const wethReserve = wethIs0 ? r0 : r1;
-
-      let sym = 'TOKEN';
-      try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
-
-      const wethAddr = ethers.getAddress(WETH);
-      const tokenAddr = ethers.getAddress(otherToken.toLowerCase());
-
-      const ethBal = await provider.getBalance(wallet.address);
-      if (ethBal < GAS_RESERVE_ETH + ethers.parseEther('0.0001')) return;
-
-      // Micro entry: 0.00008 ETH (~$0.15)
-      const entryEth = ethers.parseEther('0.00008');
-
-      const block = await provider.getBlock('latest');
-      const baseFee = block?.baseFeePerGas || 20000000n;
-      const maxPrio = 2000000n;
-      const maxFee = (baseFee * 150n) / 100n + maxPrio;
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
-
-      // Pre-flight static simulation — ensures 0 reverts on-chain across any factory
-      try {
-        await router.swapExactETHForTokensSupportingFeeOnTransferTokens.staticCall(
-          1n,
-          [wethAddr, tokenAddr],
-          wallet.address,
-          deadline,
-          { value: entryEth, from: wallet.address }
-        );
-      } catch (simErr) {
-        return; // Not tradeable via router
-      }
-
-      isEntering = true;
-      console.log(`\n🔥 NEW LIQUIDITY DETECTED: WETH/${sym} (${ethers.formatEther(wethReserve)} WETH in Pool)`);
-      console.log(`   ⚡ Entering micro-position: ${ethers.formatEther(entryEth)} ETH (~$0.15)...`);
-
-      const tx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
-        1n,
-        [wethAddr, tokenAddr],
-        wallet.address,
-        deadline,
-        { value: entryEth, gasLimit: 200000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
-      );
-      console.log(`   Tx Hash: ${tx.hash}`);
-      const receipt = await tx.wait(1);
-      console.log(`   ✅ Entry Mined in Block #${receipt.blockNumber}!`);
-      console.log(`   🔗 https://robinhoodchain.blockscout.com/tx/${tx.hash}`);
-
-      // Pre-approve token immediately upon entry for zero-latency exit
-      await ensureApproval(tokenAddr, sym);
-
-      const otherContract = new ethers.Contract(otherToken, ERC20_ABI, wallet);
-      const tokenBal = await otherContract.balanceOf(wallet.address);
-
-      // Target: +3.5% profit
-      const targetEthOut = (entryEth * 1035n) / 1000n;
-      activePositions.set(otherToken.toLowerCase(), {
-        pairAddress,
-        symbol: sym,
-        entryEth,
-        tokenBalance: tokenBal,
-        targetEthOut,
-      });
-
-      console.log(`   🎯 Target Exit Price: ${ethers.formatEther(targetEthOut)} ETH (+3.5% gain)\n`);
-    } catch (e) {
-      // Quietly ignore transient errors
-    } finally {
-      isEntering = false;
-    }
-  }
-
-  // Handle New Liquidity Addition (Mint)
-  async function handleMintEvent(log) {
-    try {
-      const pair = new ethers.Contract(log.address, PAIR_ABI, provider);
-      const [t0, t1] = await Promise.all([pair.token0(), pair.token1()]);
-      await evaluateAndEnterPair(log.address, t0, t1);
-    } catch {}
-  }
-
-  // Handle PairCreated event
-  async function handlePairCreatedEvent(log) {
-    try {
-      const token0 = '0x' + log.topics[1].slice(26);
-      const token1 = '0x' + log.topics[2].slice(26);
-      const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data);
-      const pairAddress = decoded[0];
-      await evaluateAndEnterPair(pairAddress, token0, token1);
-    } catch {}
-  }
-
-  // ── Global Event Poller ───────────────────────────────────────────────────
   setInterval(async () => {
     try {
       const currentBlock = await provider.getBlockNumber();
-      if (currentBlock <= lastBlock) {
-        process.stdout.write('.');
-        return;
-      }
-
-      const from = lastBlock + 1;
-      const to = currentBlock;
+      if (currentBlock <= lastBlock) return;
       lastBlock = currentBlock;
 
-      // 1. Check active position exits
-      if (activePositions.size > 0) {
-        await checkActiveExits();
+      // Group by symbol to compare DEXs
+      const reservesCache = {}; // dex_symbol -> { rWeth, rToken }
+
+      await Promise.all(pairsData.map(async (p) => {
+        const pair = new ethers.Contract(p.pairAddr, PAIR_ABI, provider);
+        const [r0, r1] = await pair.getReserves();
+        const rWeth = p.isWeth0 ? r0 : r1;
+        const rToken = p.isWeth0 ? r1 : r0;
+        reservesCache[`${p.dex}_${p.symbol}`] = { rWeth, rToken };
+      }));
+
+      const gasCostEth = await getGasEstimateEth();
+      let bestOpp = null;
+
+      for (const symbol of Object.keys(TOKENS)) {
+        const bs = reservesCache[`BaseSwap_${symbol}`];
+        const sb = reservesCache[`SwapBased_${symbol}`];
+        
+        if (!bs || !sb) continue;
+        if (bs.rWeth < ethers.parseEther('1') || sb.rWeth < ethers.parseEther('1')) continue; // Ignore low liquidity
+
+        const priceBs = Number(ethers.formatEther(bs.rWeth)) / Number(ethers.formatEther(bs.rToken));
+        const priceSb = Number(ethers.formatEther(sb.rWeth)) / Number(ethers.formatEther(sb.rToken));
+
+        let spread = 0;
+        let buyDex = null;
+        let sellDex = null;
+        let buyReserves = null;
+        let sellReserves = null;
+
+        if (priceBs > priceSb) {
+          spread = ((priceBs - priceSb) / priceSb) * 100;
+          buyDex = 'SwapBased'; sellDex = 'BaseSwap';
+          buyReserves = sb; sellReserves = bs;
+        } else {
+          spread = ((priceSb - priceBs) / priceBs) * 100;
+          buyDex = 'BaseSwap'; sellDex = 'SwapBased';
+          buyReserves = bs; sellReserves = sb;
+        }
+
+        if (spread > 0.3) {
+          // Simulate trade sizes
+          const testInputs = [
+            ethers.parseEther('0.00005'), // ~$0.10
+            ethers.parseEther('0.00015'), // ~$0.28
+            ethers.parseEther('0.00025'), // ~$0.47
+            ethers.parseEther('0.00050')  // ~$0.94
+          ];
+
+          let bestInput = 0n;
+          let bestNetProfit = -100000000000n; // negative infinity
+          let bestOutToken = 0n;
+          let bestOutWeth = 0n;
+
+          for (const input of testInputs) {
+            // Leg 1: Buy token with WETH
+            const outToken = getAmountOut(input, buyReserves.rWeth, buyReserves.rToken);
+            // Leg 2: Sell token for WETH
+            const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
+            
+            const grossProfit = outWeth - input;
+            const netProfit = grossProfit - gasCostEth;
+
+            if (netProfit > bestNetProfit) {
+              bestNetProfit = netProfit;
+              bestInput = input;
+              bestOutToken = outToken;
+              bestOutWeth = outWeth;
+            }
+          }
+
+          if (bestNetProfit > 0n || spread > 0.8) {
+            bestOpp = {
+              symbol, buyDex, sellDex, spread,
+              input: bestInput, outToken: bestOutToken, outWeth: bestOutWeth,
+              buyReserves: pairsData.find(p => p.symbol === symbol && p.dex === buyDex),
+              sellReserves: pairsData.find(p => p.symbol === symbol && p.dex === sellDex),
+              netProfit: bestNetProfit, gasCost: gasCostEth
+            };
+          }
+        }
       }
 
-      // 2. Query Mint (New Liquidity) and PairCreated Events
-      const [mintLogs, pairLogs] = await Promise.all([
-        provider.getLogs({ fromBlock: from, toBlock: to, topics: [MINT_TOPIC] }),
-        provider.getLogs({ fromBlock: from, toBlock: to, topics: [PAIR_CREATED_TOPIC] }),
-      ]);
+      if (bestOpp) {
+        console.log(`\n─────────────────────────────────────────────────`);
+        console.log(`[ARB SCAN] Block #${currentBlock} | Token: ${bestOpp.symbol}`);
+        console.log(`Direction: ${bestOpp.buyDex} -> ${bestOpp.sellDex}`);
+        console.log(`Spread:    ${bestOpp.spread.toFixed(2)}%`);
+        console.log(`Test Input:     $${toUsd(bestOpp.input)}`);
+        console.log(`Expected Back:  $${toUsd(bestOpp.outWeth)}`);
+        console.log(`Gas Estimate:  -$${toUsd(bestOpp.gasCost)}`);
+        console.log(`NET EXPECTED:   ${bestOpp.netProfit > 0n ? '+' : ''}$${toUsd(bestOpp.netProfit)}`);
+        
+        if (bestOpp.netProfit > 0n) {
+          console.log(`STATUS: ✅ EXECUTION CANDIDATE (Profitable)`);
+          console.log(`[ARB CANDIDATE] Token: ${bestOpp.symbol} | Route: ${bestOpp.buyDex} -> ${bestOpp.sellDex} | Input: $${toUsd(bestOpp.input)} | Expected Profit: +$${toUsd(bestOpp.netProfit)}`);
+          
+          if (!BREAD_ROUTER) {
+             console.log(`❌ BREAD_ROUTER_ADDRESS not found in .env. Skipping execution.`);
+             return;
+          }
 
-      for (const log of mintLogs) {
-        await handleMintEvent(log);
-      }
-      for (const log of pairLogs) {
-        await handlePairCreatedEvent(log);
-      }
+          // Determine direction
+          const isWeth0Buy = buyReserves.rWeth === buyReserves.r0; // Wait, we don't know r0 vs r1 here cleanly without storing it
+          // Let's refetch to be absolutely sure
+          const p1 = new ethers.Contract(bestOpp.buyReserves.pairAddr, PAIR_ABI, provider);
+          const p2 = new ethers.Contract(bestOpp.sellReserves.pairAddr, PAIR_ABI, provider);
+          
+          const t0_1 = await p1.token0();
+          const t0_2 = await p2.token0();
 
-      // 3. Query Swap logs to keep heartbeat active
-      const swapLogs = await provider.getLogs({
-        fromBlock: from,
-        toBlock: to,
-        topics: [SWAP_TOPIC],
-      });
+          const zeroForOne1 = t0_1.toLowerCase() === WETH.toLowerCase();
+          const zeroForOne2 = t0_2.toLowerCase() !== WETH.toLowerCase(); // Selling token -> WETH
 
-      if (swapLogs.length > 0) {
-        process.stdout.write(`[${swapLogs.length} swaps]`);
+          const block = await provider.getBlock('latest');
+          const baseFee = block?.baseFeePerGas || 1000000n;
+          const maxFee = (baseFee * 150n) / 100n + 50000n;
+
+          console.log(`🚀 Firing Atomic Arbitrage Transaction...`);
+          try {
+            const tx = await breadContract.executeArbitrage(
+              bestOpp.buyReserves.pairAddr,
+              bestOpp.sellReserves.pairAddr,
+              bestOpp.input,
+              bestOpp.outToken,
+              bestOpp.outWeth,
+              zeroForOne1,
+              zeroForOne2,
+              1n, // Min profit (accept any positive profit)
+              { gasLimit: 250000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: 50000n }
+            );
+            console.log(`   Tx Hash: ${tx.hash}`);
+            const receipt = await tx.wait(1);
+            console.log(`   ✅ Arbitrage Mined in Block #${receipt.blockNumber}!`);
+            console.log(`[ARB MINED] Block #${receipt.blockNumber} | Token: ${bestOpp.symbol} | Profit: +$${toUsd(bestOpp.netProfit)} | Tx: ${tx.hash}`);
+          } catch (execErr) {
+            console.log(`   ❌ Execution Failed: ${execErr.message}`);
+          }
+
+        } else {
+          console.log(`STATUS: ❌ Below minimum profit (Lost to Gas/Impact)`);
+        }
+        console.log(`─────────────────────────────────────────────────`);
       } else {
         process.stdout.write('.');
       }
-    } catch (e) {
-      if (!e.message?.includes('timeout')) {
-        process.stdout.write('!');
+
+    } catch (err) {
+      if (!err.message?.includes('timeout')) {
+        // silent
       }
     }
-  }, 1800);
+  }, 2000);
 }
 
-main().catch(e => {
-  console.error('❌ Fatal Engine Error:', e);
-  process.exit(1);
-});
+setupPairs().then(scan).catch(console.error);

@@ -5,10 +5,10 @@
  * 
  * Architecture:
  * - Decoupled Producer/Consumer Pipeline (Non-blocking block ingestion)
+ * - Priority Queues: High Priority (Genesis Launches) vs Normal Priority (Momentum Swaps)
  * - In-Memory Immutable Metadata Caching (Zero redundant token/pair RPC calls)
- * - Priority Worker Queue (Genesis launches prioritized over momentum swaps)
  * - 2-Way Pre-Flight Honeypot Simulation Shield (Strict safety preserved)
- * - Real-Time Precision Funnel & Latency Instrumentation
+ * - Real-Time Precision Funnel & Latency Instrumentation (Median & P95)
  */
 
 import { ethers } from 'ethers';
@@ -97,28 +97,53 @@ function savePersistedPositions(map) {
   } catch {}
 }
 
-// Global In-Memory Caches
+// Global In-Memory Caches & Queues
 const metadataCache = new Map(); // pairAddr -> { token0, token1, isWeth0, otherToken, symbol }
 const pairVelocityCache = new Map(); // pairAddr -> swapCount
-const candidateQueue = []; // [{ priority, pairAddress, token0, token1, source }]
+const highPriorityQueue = []; // Genesis Launches (PairCreated, Mint)
+const normalPriorityQueue = []; // Momentum Swaps
 let isWorkerRunning = false;
 
-// Real-Time Telemetry & Funnel Metrics
+// Real-Time Precision Funnel Telemetry
 const telemetry = {
   startTime: Date.now(),
+  currentBlock: 0,
   blocksIngested: 0,
-  swapsScanned: 0,
-  genesisDetected: 0,
-  candidatesQueued: 0,
-  liquidityQualified: 0,
-  buySimPassed: 0,
-  sellSimPassed: 0,
-  tradesExecuted: 0,
-  cacheHits: 0,
-  cacheMisses: 0,
   lastDetectionLatencyMs: 0,
   lastIngestDurationMs: 0,
-  rpcCalls: 0
+  
+  // Events
+  swapsScanned: 0,
+  pairCreatedDetected: 0,
+  mintDetected: 0,
+
+  // Candidates Enqueued
+  genesisQueued: 0,
+  momentumQueued: 0,
+
+  // Filter Funnel Stages
+  liquidityPassed: 0,
+  buySimPassed: 0,
+  sellSimPassed: 0,
+  profitPassed: 0,
+  riskApproved: 0,
+  tradesExecuted: 0,
+
+  cacheHits: 0,
+  cacheMisses: 0,
+
+  // Decision Latency Window (Last 100 candidate evaluations)
+  decisionLatencies: [],
+  getMedianLatency() {
+    if (this.decisionLatencies.length === 0) return 0;
+    const sorted = [...this.decisionLatencies].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  },
+  getP95Latency() {
+    if (this.decisionLatencies.length === 0) return 0;
+    const sorted = [...this.decisionLatencies].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length * 0.95)];
+  }
 };
 
 async function main() {
@@ -319,6 +344,7 @@ async function main() {
   }
 
   async function processCandidate(item) {
+    const evalStart = Date.now();
     const { pairAddress, token0, token1, source } = item;
     try {
       const meta = await getOrFetchMetadata(pairAddress, token0, token1);
@@ -341,7 +367,7 @@ async function main() {
 
       const wethReserve = meta.isWeth0 ? r0 : r1;
       if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) return;
-      telemetry.liquidityQualified++;
+      telemetry.liquidityPassed++;
 
       const ethBal = await provider.getBalance(wallet.address);
       if (ethBal < GAS_RESERVE_ETH + ethers.parseEther('0.000005')) return;
@@ -380,6 +406,12 @@ async function main() {
         return; // Sell failed
       }
       telemetry.sellSimPassed++;
+      telemetry.riskApproved++;
+
+      // Record Decision Latency
+      const evalDuration = Date.now() - evalStart;
+      telemetry.decisionLatencies.push(evalDuration);
+      if (telemetry.decisionLatencies.length > 100) telemetry.decisionLatencies.shift();
 
       // ⚡ EXECUTE REAL ON-CHAIN SNIPE:
       const block = await provider.getBlock('latest');
@@ -428,6 +460,10 @@ async function main() {
       console.log(`────────────────────────────────────────────────────────────────────────────\n`);
     } catch (err) {
       console.log(`⚠️ Trade Execution Warning: ${err.message}`);
+    } finally {
+      const evalDuration = Date.now() - evalStart;
+      telemetry.decisionLatencies.push(evalDuration);
+      if (telemetry.decisionLatencies.length > 100) telemetry.decisionLatencies.shift();
     }
   }
 
@@ -436,13 +472,18 @@ async function main() {
     isWorkerRunning = true;
 
     while (true) {
-      if (candidateQueue.length > 0) {
-        // Sort priority queue: Priority 1 (Genesis) before Priority 2 (Momentum)
-        candidateQueue.sort((a, b) => a.priority - b.priority);
-        const item = candidateQueue.shift();
+      // Prioritize High Priority Queue (Genesis/Mint) before Normal Priority Queue (Momentum)
+      let item = null;
+      if (highPriorityQueue.length > 0) {
+        item = highPriorityQueue.shift();
+      } else if (normalPriorityQueue.length > 0) {
+        item = normalPriorityQueue.shift();
+      }
+
+      if (item) {
         await processCandidate(item);
       } else {
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 40));
       }
     }
   }
@@ -459,7 +500,10 @@ async function main() {
   // =========================================================================
 
   let lastBlock = await provider.getBlockNumber();
+  telemetry.currentBlock = lastBlock;
   console.log(`📡 Ingestion Engine Subscribed to Base Chain at Block #${lastBlock}`);
+
+  let blockCycleCounter = 0;
 
   setInterval(async () => {
     const cycleStart = Date.now();
@@ -470,6 +514,7 @@ async function main() {
       const from = lastBlock + 1;
       const to = currentBlock;
       lastBlock = currentBlock;
+      telemetry.currentBlock = currentBlock;
 
       const blockInfo = await provider.getBlock(currentBlock).catch(() => null);
       if (blockInfo && blockInfo.timestamp) {
@@ -477,6 +522,7 @@ async function main() {
       }
 
       telemetry.blocksIngested += (to - from + 1);
+      blockCycleCounter += (to - from + 1);
 
       if (activePositions.size > 0) {
         await checkActiveExits();
@@ -490,32 +536,32 @@ async function main() {
         provider.getLogs({ fromBlock: from, toBlock: to, topics: [SWAP_TOPIC] }).catch(() => []),
       ]);
 
-      // 1. Enqueue Priority 1 Genesis Launches
+      // 1. Enqueue Priority 1 Genesis Launches (High Priority Queue)
       for (const log of pairLogs) {
-        telemetry.genesisDetected++;
+        telemetry.pairCreatedDetected++;
         const token0 = '0x' + log.topics[1].slice(26);
         const token1 = '0x' + log.topics[2].slice(26);
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data);
-        candidateQueue.push({ priority: 1, pairAddress: decoded[0], token0, token1, source: 'Genesis UniswapV2' });
-        telemetry.candidatesQueued++;
+        highPriorityQueue.push({ priority: 1, pairAddress: decoded[0], token0, token1, source: 'Genesis UniswapV2' });
+        telemetry.genesisQueued++;
       }
 
       for (const log of aeroLogs) {
-        telemetry.genesisDetected++;
+        telemetry.pairCreatedDetected++;
         const token0 = '0x' + log.topics[1].slice(26);
         const token1 = '0x' + log.topics[2].slice(26);
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data);
-        candidateQueue.push({ priority: 1, pairAddress: decoded[0], token0, token1, source: 'Genesis Aerodrome' });
-        telemetry.candidatesQueued++;
+        highPriorityQueue.push({ priority: 1, pairAddress: decoded[0], token0, token1, source: 'Genesis Aerodrome' });
+        telemetry.genesisQueued++;
       }
 
       for (const log of mintLogs) {
-        telemetry.genesisDetected++;
-        candidateQueue.push({ priority: 1, pairAddress: log.address, source: 'Initial Mint' });
-        telemetry.candidatesQueued++;
+        telemetry.mintDetected++;
+        highPriorityQueue.push({ priority: 1, pairAddress: log.address, source: 'Initial Mint' });
+        telemetry.genesisQueued++;
       }
 
-      // 2. Enqueue Priority 2 Momentum Surges
+      // 2. Enqueue Priority 2 Momentum Surges (Normal Priority Queue)
       telemetry.swapsScanned += swapLogs.length;
       for (const sLog of swapLogs) {
         const pAddr = sLog.address.toLowerCase();
@@ -523,17 +569,43 @@ async function main() {
         pairVelocityCache.set(pAddr, count);
 
         if (count >= 1) {
-          candidateQueue.push({ priority: 2, pairAddress: sLog.address, source: 'Momentum Burst' });
-          telemetry.candidatesQueued++;
+          normalPriorityQueue.push({ priority: 2, pairAddress: sLog.address, source: 'Momentum Burst' });
+          telemetry.momentumQueued++;
         }
       }
 
       telemetry.lastIngestDurationMs = Date.now() - cycleStart;
 
-      // Print live ticker with real metrics
+      // Print live single-line ticker
       const elapsedSec = Math.max(1, (Date.now() - telemetry.startTime) / 1000);
       const swapRate = (telemetry.swapsScanned / elapsedSec).toFixed(1);
-      process.stdout.write(`\r⏳ Block #${currentBlock} | Ingest: ${telemetry.lastIngestDurationMs}ms | Latency: ${telemetry.lastDetectionLatencyMs}ms | 🔄 Swaps: ${telemetry.swapsScanned} (${swapRate}/s) | Queue: ${candidateQueue.length} `);
+      const medLat = telemetry.getMedianLatency();
+      const p95Lat = telemetry.getP95Latency();
+      const totalQ = highPriorityQueue.length + normalPriorityQueue.length;
+
+      process.stdout.write(`\r⏳ Block #${currentBlock} | Ingest: ${telemetry.lastIngestDurationMs}ms | Latency: ${telemetry.lastDetectionLatencyMs}ms | 🔄 Swaps: ${telemetry.swapsScanned} (${swapRate}/s) | Q(High/Norm): ${highPriorityQueue.length}/${normalPriorityQueue.length} | Decision: Med ${medLat}ms/P95 ${p95Lat}ms `);
+
+      // Every 30 blocks (~45-60s), print structured decision funnel snapshot
+      if (blockCycleCounter >= 30) {
+        blockCycleCounter = 0;
+        console.log(`\n\n═══════════════════════════════════════════════════════════════════════════════`);
+        console.log(`⚡ BASE REAL-TIME SCANNER & DECISION FUNNEL TELEMETRY`);
+        console.log(`═══════════════════════════════════════════════════════════════════════════════`);
+        console.log(`📡 Block Height:        #${currentBlock} (Detect Latency: ${telemetry.lastDetectionLatencyMs}ms | Ingest Cycle: ${telemetry.lastIngestDurationMs}ms)`);
+        console.log(`🔄 Events Captured:     Swaps: ${telemetry.swapsScanned} (${swapRate}/s) | PairCreated: ${telemetry.pairCreatedDetected} | Mint: ${telemetry.mintDetected}`);
+        console.log(`🎯 Candidates Enqueued: Genesis: ${telemetry.genesisQueued} | Momentum: ${telemetry.momentumQueued}`);
+        console.log(`───────────────────────────────────────────────────────────────────────────────`);
+        console.log(`🛡️ FILTER FUNNEL AUDIT:`);
+        console.log(`   • Liquidity Qualified (0.05 - 300 WETH): ${telemetry.liquidityPassed}`);
+        console.log(`   • Buy Leg Simulation Passed:            ${telemetry.buySimPassed}`);
+        console.log(`   • Sell Leg Return Passed (>=70%):        ${telemetry.sellSimPassed} (Honeypot Shield Active 🟢)`);
+        console.log(`   • Risk & Capital Approved:               ${telemetry.riskApproved}`);
+        console.log(`   • Real On-Chain Trades Executed:         ${telemetry.tradesExecuted}`);
+        console.log(`───────────────────────────────────────────────────────────────────────────────`);
+        console.log(`⏱️ DECISION LATENCY:   Median: ${medLat} ms | P95: ${p95Lat} ms`);
+        console.log(`📦 QUEUE DEPTH:        High Priority (Genesis): ${highPriorityQueue.length} | Normal: ${normalPriorityQueue.length} | Total: ${totalQ}`);
+        console.log(`═══════════════════════════════════════════════════════════════════════════════\n`);
+      }
 
     } catch (e) {
       // quiet

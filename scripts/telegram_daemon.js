@@ -291,18 +291,21 @@ async function sendDiagnostic(chatId) {
   const uptimeMinutes = ((Date.now() - startTime) / 60000).toFixed(1);
   const memMb = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
 
-  const diag = `🩺 *SUSHIBREAD PRO-LEVEL HEALTH DIAGNOSTIC*\n` +
+  const diag = `🩺 *SUSHIBREAD PRO TELEMETRY & DECISION FUNNEL*\n` +
     `────────────────────────────\n` +
-    `🌐 *Render Cloud Uptime:* \`${uptimeMinutes} min\` (RAM: \`${memMb} MB\`)\n` +
-    `⚡ *Base RPC Latency:* \`${latency} ms\` (Block: \`#${blockNum}\`)\n` +
-    `📍 *Bot Wallet:* \`${stats.address}\`\n` +
-    `💰 *Available ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
-    `🏦 *USDC Profit Vault:* \`$${stats.usdcBal} USDC\`\n` +
-    `⚙️ *Sniper Status:* ${isEngineRunning ? '🟢 ACTIVE & SNIPING' : '🔴 STANDBY'}\n` +
-    `🛡️ *2-Way Honeypot Shield:* 🟢 VERIFIED & ONLINE\n` +
-    `🔒 *Liquidity Bounds:* 0.25 to 25.0 WETH\n` +
+    `📡 *Base Block:* \`#${liveBlockNumber}\` (Latency: \`${liveDetectLatency}ms\` | Ingest: \`${liveIngestDuration}ms\`)\n` +
+    `🔄 *Throughput:* \`${liveSwapsCount} swaps\` (\`${liveSwapRate}/s\`)\n` +
+    `📦 *Queue Depth:* \`Active Queue: ${liveCandidateQueue}\`\n` +
+    `🌐 *Cloud Host:* Render 24/7 (RAM: \`${memMb} MB\` | Up: \`${uptimeMinutes}m\`)\n` +
     `────────────────────────────\n` +
-    `✅ *All Systems Operational. Zero Terminal Intervention Required.*`;
+    `🛡️ *SAFETY & FUNNEL STATUS:*\n` +
+    `• *2-Way Honeypot Shield:* 🟢 ACTIVE (>=70% Return Required)\n` +
+    `• *Liquidity Bounds:* 0.05 to 300.0 WETH\n` +
+    `• *Entry Sizing:* $0.11 Fixed Micro-Cap\n` +
+    `• *Active ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
+    `• *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
+    `────────────────────────────\n` +
+    `✅ *Decoupled Producer/Consumer Pipeline Active.*`;
 
   await telegramCall('sendMessage', { chat_id: chatId, text: diag, parse_mode: 'Markdown', reply_markup: getKeyboard() });
 }

@@ -173,7 +173,7 @@ async function startLiveRadar(chatId) {
         `💰 *Gas Wallet:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
         `🍞 *Arb Bankroll:* \`${curStats.breadBal} WETH\` (~$${curStats.breadUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
-        `🛡️ *Routing:* BaseSwap ↔️ SwapBased ↔️ SushiSwap\n` +
+        `🛡️ *Routing:* BaseSwap ↔️ SwapBased ↔️ AlienBase\n` +
         `────────────────────────────\n` +
         `⚡ *Status:* ${curStats.status}`;
 
@@ -248,13 +248,13 @@ function startEngine(chatId) {
     isEngineRunning = false;
     engineProcess = null;
     if (liveTickerInterval) { clearInterval(liveTickerInterval); liveTickerInterval = null; }
-    telegramCall('sendMessage', { chat_id: chatId, text: `ℹ️ *Sniper Engine Process Stopped* (Code: ${code})`, parse_mode: 'Markdown', reply_markup: getKeyboard() });
+    telegramCall('sendMessage', { chat_id: chatId, text: `ℹ️ *Arbitrage Engine Process Stopped* (Code: ${code})`, parse_mode: 'Markdown', reply_markup: getKeyboard() });
   });
 }
 
 function stopEngine(chatId) {
   if (!isEngineRunning || !engineProcess) {
-    telegramCall('sendMessage', { chat_id: chatId, text: 'ℹ️ *Engine is not currently running.*', parse_mode: 'Markdown' });
+    telegramCall('sendMessage', { chat_id: chatId, text: 'ℹ️ *Arbitrage Engine is not currently running.*', parse_mode: 'Markdown' });
     return;
   }
 
@@ -262,7 +262,7 @@ function stopEngine(chatId) {
   engineProcess.kill('SIGINT');
   isEngineRunning = false;
   engineProcess = null;
-  telegramCall('sendMessage', { chat_id: chatId, text: '🛑 *SNIPER ENGINE STOPPED.*', parse_mode: 'Markdown', reply_markup: getKeyboard() });
+  telegramCall('sendMessage', { chat_id: chatId, text: '🛑 *ARBITRAGE ENGINE STOPPED.*', parse_mode: 'Markdown', reply_markup: getKeyboard() });
 }
 
 async function sendDiagnostic(chatId) {
@@ -294,7 +294,7 @@ async function sendDiagnostic(chatId) {
 
 async function sendLogs(chatId) {
   if (rollingLogs.length === 0) {
-    await telegramCall('sendMessage', { chat_id: chatId, text: '📜 *No logs captured yet.* Tap `🚀 Start Sniper` to generate live logs.', parse_mode: 'Markdown', reply_markup: getKeyboard() });
+    await telegramCall('sendMessage', { chat_id: chatId, text: '📜 *No logs captured yet.* Tap `🚀 Start Arb Engine` to generate live logs.', parse_mode: 'Markdown', reply_markup: getKeyboard() });
     return;
   }
 
@@ -402,13 +402,13 @@ async function handleUpdate(update) {
     } else if (data === 'clear_state') {
       clearState(chatId);
     } else if (data === 'settings') {
-      const settingsMsg = `⚙️ *SNIPER CONFIGURATION*\n────────────────────────────\n` +
+      const settingsMsg = `⚙️ *ATOMIC ARBITRAGE CONFIGURATION*\n────────────────────────────\n` +
         `• *Target Chain:* Base Mainnet (8453)\n` +
-        `• *AI Entry Sizing:* Dynamic (PRIME / STANDARD / DEGEN)\n` +
-        `• *Take-Profit:* +3.5% (Auto-Sweep to USDC)\n` +
-        `• *Stop-Loss:* -35% (After 12 blocks)\n` +
-        `• *Liquidity Sweet Spot:* 0.25 to 25.0 WETH\n` +
-        `• *2-Way Honeypot Shield:* ACTIVE\n────────────────────────────`;
+        `• *Matrix:* BaseSwap ↔️ SwapBased ↔️ AlienBase\n` +
+        `• *Batch Reader:* Multicall3 (1-call per block)\n` +
+        `• *Routing:* Bread.sol Atomic Arbitrage Router\n` +
+        `• *Volume Sizing:* Multi-Tier Ladder + Half-Step Convergence\n` +
+        `• *Safety Guard:* Mathematical Invariant Check (0 Reverts)\n────────────────────────────`;
       await telegramCall('sendMessage', { chat_id: chatId, text: settingsMsg, parse_mode: 'Markdown', reply_markup: getKeyboard() });
     }
   }

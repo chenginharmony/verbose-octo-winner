@@ -6,11 +6,20 @@
  */
 
 import { spawn } from 'child_process';
+import http from 'http';
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 dotenv.config();
+
+const PORT = process.env.PORT || 10000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('SushiBread MEV Telegram Bot Online 24/7');
+}).listen(PORT, () => {
+  console.log(`🌐 Health check web server active on port ${PORT}`);
+});
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const RPC = process.env.BASE_RPC_URL || 'https://developer-access-mainnet.base.org';

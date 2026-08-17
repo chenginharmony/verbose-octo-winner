@@ -81,6 +81,8 @@ async function setupPairs() {
       } catch (e) {
         console.log(`Failed to fetch pair for ${symbol} on ${dex}`);
       }
+      // Delay to avoid RPC rate limiting
+      await new Promise(r => setTimeout(r, 200));
     }
   }
   console.log(`✅ Loaded ${pairsData.length} Liquidity Pools.`);
@@ -99,13 +101,18 @@ async function scan() {
       // Group by symbol to compare DEXs
       const reservesCache = {}; // dex_symbol -> { rWeth, rToken }
 
-      await Promise.all(pairsData.map(async (p) => {
-        const pair = new ethers.Contract(p.pairAddr, PAIR_ABI, provider);
-        const [r0, r1] = await pair.getReserves();
-        const rWeth = p.isWeth0 ? r0 : r1;
-        const rToken = p.isWeth0 ? r1 : r0;
-        reservesCache[`${p.dex}_${p.symbol}`] = { rWeth, rToken };
-      }));
+      // Fetch sequentially to avoid rate limiting
+      for (const p of pairsData) {
+        try {
+          const pair = new ethers.Contract(p.pairAddr, PAIR_ABI, provider);
+          const [r0, r1] = await pair.getReserves();
+          const rWeth = p.isWeth0 ? r0 : r1;
+          const rToken = p.isWeth0 ? r1 : r0;
+          reservesCache[`${p.dex}_${p.symbol}`] = { rWeth, rToken };
+        } catch (e) {
+          // If a single pair fails to fetch, we just skip it for this block
+        }
+      }
 
       const gasCostEth = await getGasEstimateEth();
       let bestOpp = null;

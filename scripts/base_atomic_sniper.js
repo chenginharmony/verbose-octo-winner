@@ -375,11 +375,6 @@ async function main() {
     }
   }
 
-  const honeypotBlacklist = new Map([
-    ['0x6eb6b145fcb1c853612d396d58388ebb485bacad', Date.now()], // LIQUIDBGT
-    ['0x1f1c695f6b4a3f8b05f2492cef9474afb6d6ad69', Date.now()], // A1C
-  ]);
-
   let isEntering = false;
 
   const EXCLUDED_TOKENS = new Set([
@@ -401,15 +396,14 @@ async function main() {
       const otherTokenLower = otherToken.toLowerCase();
 
       if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
-      if (honeypotBlacklist.has(otherTokenLower)) return;
       if (activePositions.has(otherTokenLower)) return;
 
       const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
       const [r0, r1] = await pair.getReserves();
       const wethReserve = wethIs0 ? r0 : r1;
 
-      // Golden Meme Snipe Window: 0.25 WETH (~$470) to 100.0 WETH (~$190,000)
-      if (wethReserve < ethers.parseEther('0.25') || wethReserve > ethers.parseEther('100.0')) return;
+      // Golden Meme Snipe Window: 0.20 WETH (~$380) to 150.0 WETH (~$280,000)
+      if (wethReserve < ethers.parseEther('0.20') || wethReserve > ethers.parseEther('150.0')) return;
 
       let sym = 'TOKEN';
       try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
@@ -442,27 +436,19 @@ async function main() {
           { value: entryEth, from: wallet.address }
         );
       } catch (buyErr) {
-        honeypotBlacklist.set(otherTokenLower, Date.now());
-        return; // Skip non-tradeable pairs & cache as honeypot
+        return; // Skip non-tradeable pairs
       }
 
       // Step 2: Simulate SELL Leg & Verify Fair Return (No 100% Honeypot Tax)
       try {
         const estTokens = (await router.getAmountsOut(entryEth, [wethAddr, tokenAddr]))[1];
-        if (estTokens === 0n) {
-          honeypotBlacklist.set(otherTokenLower, Date.now());
-          return;
-        }
+        if (estTokens === 0n) return;
         const estEthBack = (await router.getAmountsOut(estTokens, [tokenAddr, wethAddr]))[1];
         
-        // If sell return is < 70% of entry due to malicious tax, ABORT & BLACKLIST!
-        if (estEthBack < (entryEth * 70n) / 100n) {
-          honeypotBlacklist.set(otherTokenLower, Date.now());
-          return;
-        }
+        // If sell return is < 70% of entry due to malicious tax, ABORT!
+        if (estEthBack < (entryEth * 70n) / 100n) return;
       } catch (sellErr) {
-        honeypotBlacklist.set(otherTokenLower, Date.now());
-        return; // Malicious token that blocks DEX sells — ABORT & BLACKLIST!
+        return; // Malicious token that blocks DEX sells — ABORT!
       }
 
       isEntering = true;
@@ -489,6 +475,9 @@ async function main() {
       console.log(`⚡ Buy Tx Broadcasted: ${buyTx.hash}`);
       const receipt = await buyTx.wait(1);
       console.log(`🎉 BUY CONFIRMED! Block: ${receipt.blockNumber} (Gas Used: ${receipt.gasUsed.toString()})`);
+      telegram.notifySnipe(sym, tokenAddr, ethers.formatEther(wethReserve), ethers.formatEther(entryEth), buyTx.hash);
+
+      await ensureApproval(tokenAddr, sym);
 
       const tokenContract = new ethers.Contract(tokenAddr, ERC20_ABI, wallet);
       const tokenBal = await tokenContract.balanceOf(wallet.address);
@@ -506,9 +495,10 @@ async function main() {
 
       savePersistedPositions(activePositions);
       console.log(`🎯 Position Saved: Holding ${ethers.formatEther(tokenBal)} ${sym}`);
-      isEntering = false;
+      console.log(`────────────────────────────────────────────────────────────────────────────\n`);
     } catch (err) {
       console.log(`⚠️ Entry Error: ${err.message}`);
+    } finally {
       isEntering = false;
     }
   }
@@ -550,11 +540,10 @@ async function main() {
       const otherTokenLower = otherToken.toLowerCase();
 
       if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
-      if (honeypotBlacklist.has(otherTokenLower)) return;
       if (activePositions.has(otherTokenLower)) return;
 
       const wethReserve = wethIs0 ? r0 : r1;
-      if (wethReserve < ethers.parseEther('0.5') || wethReserve > ethers.parseEther('100.0')) return;
+      if (wethReserve < ethers.parseEther('0.5') || wethReserve > ethers.parseEther('150.0')) return;
 
       await evaluateAndEnterPair(pairAddress, t0, t1);
     } catch {}

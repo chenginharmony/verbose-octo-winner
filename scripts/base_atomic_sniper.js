@@ -107,12 +107,36 @@ function savePersistedPositions(map) {
   }
 }
 
+const SNIPED_TOKENS_FILE = path.join(process.cwd(), 'state', 'sniped_tokens.json');
+
+// Permanent Sniped Tokens Registry
+function loadSnipedTokens() {
+  try {
+    if (fs.existsSync(SNIPED_TOKENS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SNIPED_TOKENS_FILE, 'utf8'));
+      return new Set(data.map(addr => addr.toLowerCase()));
+    }
+  } catch (err) {
+    console.log('Sniped tokens load notice:', err.message);
+  }
+  return new Set();
+}
+
+function saveSnipedTokens(set) {
+  try {
+    fs.writeFileSync(SNIPED_TOKENS_FILE, JSON.stringify(Array.from(set)), 'utf8');
+  } catch (err) {
+    console.log('Sniped tokens save notice:', err.message);
+  }
+}
+
 // Global In-Memory Caches, Queues & Concurrency Locks
 const metadataCache = new Map(); // pairAddr -> { token0, token1, isWeth0, otherToken, symbol }
 const pairVelocityCache = new Map(); // pairAddr -> swapCount
 const highPriorityQueue = []; // Genesis Launches
 const normalPriorityQueue = []; // Momentum Swaps
 const inFlightTokens = new Set(); // Tokens currently being bought or exited
+const lifetimeSnipedTokens = loadSnipedTokens(); // Tokens that have been successfully bought before
 
 // Real-Time Precision Funnel Telemetry
 const telemetry = {
@@ -132,9 +156,12 @@ const telemetry = {
   momentumQueued: 0,
 
   // Filter Funnel Stages
-  liquidityPassed: 0,
-  buySimPassed: 0,
-  sellSimPassed: 0,
+  rejectedDuplicate: 0,
+  rejectedLiquidity: 0,
+  rejectedCapital: 0,
+  rejectedBuySim: 0,
+  rejectedSellSim: 0,
+  
   riskApproved: 0,
   tradesExecuted: 0,
 
@@ -426,10 +453,19 @@ async function main() {
       otherTokenLower = meta.otherToken.toLowerCase();
       if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
 
-      // 🛡️ LOCK CHECK 1: In-Flight or Active Position Check
-      if (inFlightTokens.has(otherTokenLower) || activePositions.has(otherTokenLower)) return;
+      // 🛡️ LOCK CHECK 1: Lifetime Snipe Deduplication (Has this token EVER been bought before?)
+      if (lifetimeSnipedTokens.has(otherTokenLower)) {
+        telemetry.rejectedDuplicate++;
+        return;
+      }
 
-      // 🛡️ LOCK CHECK 2: On-Chain Reality Check (Do we already hold this token on-chain?)
+      // 🛡️ LOCK CHECK 2: In-Flight or Active Position Check
+      if (inFlightTokens.has(otherTokenLower) || activePositions.has(otherTokenLower)) {
+        telemetry.rejectedDuplicate++;
+        return;
+      }
+
+      // 🛡️ LOCK CHECK 3: On-Chain Reality Check (Do we already hold this token on-chain?)
       const tokenContract = new ethers.Contract(meta.otherToken, ERC20_ABI, provider);
       const existingBal = await tokenContract.balanceOf(wallet.address).catch(() => 0n);
       if (existingBal > 0n) {
@@ -462,12 +498,17 @@ async function main() {
       }
 
       const wethReserve = meta.isWeth0 ? r0 : r1;
-      if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) return;
-      telemetry.liquidityPassed++;
+      if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) {
+        telemetry.rejectedLiquidity++;
+        return;
+      }
 
       // 2. Strict Entry Capital Check (Must have full $0.11 entry capital + gas reserve)
       const ethBal = await provider.getBalance(wallet.address);
-      if (ethBal < (FIXED_ENTRY_ETH + GAS_RESERVE_ETH)) return; // DO NOT ENTER WITH DUST!
+      if (ethBal < (FIXED_ENTRY_ETH + GAS_RESERVE_ETH)) {
+        telemetry.rejectedCapital++;
+        return; // DO NOT ENTER WITH DUST!
+      }
 
       const entryEth = FIXED_ENTRY_ETH;
       const wethAddr = ethers.getAddress(WETH);
@@ -485,20 +526,26 @@ async function main() {
           { value: entryEth, from: wallet.address }
         );
       } catch {
+        telemetry.rejectedBuySim++;
         return; // Buy simulation failed
       }
-      telemetry.buySimPassed++;
 
       // Step 2: Simulate SELL Leg & Verify Minimum 70% Return
       try {
         const estTokens = (await router.getAmountsOut(entryEth, [wethAddr, tokenAddr]))[1];
-        if (estTokens === 0n) return;
+        if (estTokens === 0n) {
+          telemetry.rejectedSellSim++;
+          return;
+        }
         const estEthBack = (await router.getAmountsOut(estTokens, [tokenAddr, wethAddr]))[1];
-        if (estEthBack < (entryEth * 70n) / 100n) return;
+        if (estEthBack < (entryEth * 70n) / 100n) {
+          telemetry.rejectedSellSim++;
+          return;
+        }
       } catch {
+        telemetry.rejectedSellSim++;
         return; // Sell simulation failed (Honeypot)
       }
-      telemetry.sellSimPassed++;
       telemetry.riskApproved++;
 
       // 🔒 Acquire In-Flight Lock
@@ -556,7 +603,10 @@ async function main() {
         status: 'OPEN'
       });
 
-      savePersistedPositions(activePositions);
+      // Add to Lifetime Sniped Tokens Registry
+      lifetimeSnipedTokens.add(otherTokenLower);
+      saveSnipedTokens(lifetimeSnipedTokens);
+
       console.log(`🎯 Position Registered: Holding ${tokenBal.toString()} ${meta.symbol} (Autonomous Exit Active)`);
       console.log(`────────────────────────────────────────────────────────────────────────────\n`);
 
@@ -695,11 +745,14 @@ async function main() {
         console.log(`🎯 Candidates Enqueued: Genesis: ${telemetry.genesisQueued} | Momentum: ${telemetry.momentumQueued}`);
         console.log(`───────────────────────────────────────────────────────────────────────────────`);
         console.log(`🛡️ FILTER FUNNEL AUDIT:`);
-        console.log(`   • Liquidity Qualified (0.05 - 300 WETH): ${telemetry.liquidityPassed}`);
-        console.log(`   • Buy Leg Simulation Passed:            ${telemetry.buySimPassed}`);
-        console.log(`   • Sell Leg Return Passed (>=70%):        ${telemetry.sellSimPassed} (Honeypot Shield Active 🟢)`);
-        console.log(`   • Risk & Capital Approved:               ${telemetry.riskApproved}`);
-        console.log(`   • Real On-Chain Trades Executed:         ${telemetry.tradesExecuted}`);
+        console.log(`   ❌ Rejected: Duplicate/Cooldown:        ${telemetry.rejectedDuplicate}`);
+        console.log(`   ❌ Rejected: Liquidity Bounds:          ${telemetry.rejectedLiquidity}`);
+        console.log(`   ❌ Rejected: Insufficient Capital:      ${telemetry.rejectedCapital}`);
+        console.log(`   ❌ Rejected: Buy Simulation Failed:     ${telemetry.rejectedBuySim}`);
+        console.log(`   ❌ Rejected: Sell Simulation (Honeypot):${telemetry.rejectedSellSim}`);
+        console.log(`───────────────────────────────────────────────────────────────────────────────`);
+        console.log(`   ✅ Risk & Capital Approved:             ${telemetry.riskApproved}`);
+        console.log(`   ✅ Real On-Chain Trades Executed:       ${telemetry.tradesExecuted}`);
         console.log(`───────────────────────────────────────────────────────────────────────────────`);
         console.log(`⏱️ DECISION LATENCY:   Median: ${medLat} ms | P95: ${p95Lat} ms`);
         console.log(`📦 QUEUE & POSITIONS:  Queue (High/Norm): ${highPriorityQueue.length}/${normalPriorityQueue.length} | Open Positions: ${activePositions.size}`);

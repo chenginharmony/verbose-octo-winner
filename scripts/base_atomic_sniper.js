@@ -300,6 +300,30 @@ async function main() {
         const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
         const minEthOut = shouldStopLoss ? 1n : (currentEthOut * 85n) / 100n;
 
+        // 🛡️ CIRCUIT BREAKER: Pre-Flight StaticCall Simulation (Zero gas on failed sells)
+        try {
+          await router.swapExactTokensForETHSupportingFeeOnTransferTokens.staticCall(
+            onChainBal,
+            minEthOut,
+            [tokChk, wethChk],
+            wallet.address,
+            deadline,
+            { from: wallet.address }
+          );
+        } catch (simErr) {
+          pos.exitAttempts = (pos.exitAttempts || 0) + 1;
+          console.log(`🛑 [CIRCUIT BREAKER] Sell simulation failed for ${pos.symbol} (Attempt ${pos.exitAttempts}/2): ${simErr.message}. Aborting broadcast! Zero gas spent.`);
+          pos.isExiting = false;
+          if (pos.exitAttempts >= 2) {
+            console.log(`🔒 [CIRCUIT BREAKER ACTIVATED] Max exit attempts reached for ${pos.symbol}. Marking EXIT_BLOCKED.`);
+            pos.status = 'EXIT_BLOCKED';
+            activePositions.delete(tokLower);
+            savePersistedPositions(activePositions);
+            inFlightTokens.delete(tokLower);
+          }
+          return;
+        }
+
         const tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
           onChainBal,
           minEthOut,

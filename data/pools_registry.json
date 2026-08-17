@@ -1,7 +1,7 @@
 {
-  "lastScannedBlock": 50100239,
+  "lastScannedBlock": 50101693,
   "tokens": {
-    "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA": {
+    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": {
       "SwapBased": {
         "pairAddr": "0x86cd030822547105Bd7952AF4ba48534640A3824",
         "isWeth0": true,
@@ -16,9 +16,24 @@
         "pairAddr": "0xeF24722d5daE32Dc155d961561cFFbc5f347EeE7",
         "isWeth0": true,
         "symbol": "USDbC"
+      },
+      "UniswapV2": {
+        "pairAddr": "0xe902EF54E437967c8b37D30E80ff887955c90DB6",
+        "isWeth0": true,
+        "symbol": "USDbC"
+      },
+      "Aerodrome": {
+        "pairAddr": "0xB4885Bc63399BF5518b994c1d0C153334Ee579D0",
+        "isWeth0": true,
+        "symbol": "USDbC"
+      },
+      "SushiSwap": {
+        "pairAddr": "0xEDc8F86740DAAfED0a38f1b73F9964aa5C80901C",
+        "isWeth0": true,
+        "symbol": "USDbC"
       }
     },
-    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": {
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
       "BaseSwap": {
         "pairAddr": "0xab067c01C7F5734da168C699Ae9d23a4512c9FdB",
         "isWeth0": true,
@@ -33,9 +48,24 @@
         "pairAddr": "0xB16D2257643fdBB32d12b9d73faB784eB4f1Bee4",
         "isWeth0": true,
         "symbol": "USDC"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",
+        "isWeth0": true,
+        "symbol": "USDC"
+      },
+      "Aerodrome": {
+        "pairAddr": "0xcDAC0d6c6C59727a65F871236188350531885C43",
+        "isWeth0": true,
+        "symbol": "USDC"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x2F8818D1B0f3e3E295440c1C0cDDf40aAA21fA87",
+        "isWeth0": true,
+        "symbol": "USDC"
       }
     },
-    "0x532f27101965dd16442E59d40670FaF5eBB142E4": {
+    "0x532f27101965dd16442e59d40670faf5ebb142e4": {
       "AlienBase": {
         "pairAddr": "0xDBfC587661Fa53e90569D6882F09d5069f9C9Bc9",
         "isWeth0": true,
@@ -50,9 +80,24 @@
         "pairAddr": "0xA5826174c3E543aaA162FE2Dd468A5824724DB7b",
         "isWeth0": true,
         "symbol": "BRETT"
+      },
+      "UniswapV2": {
+        "pairAddr": "0xb34380BA6a17B022782c7FC91e319C10c168FB98",
+        "isWeth0": true,
+        "symbol": "BRETT"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x214356Cc4aAb907244A791CA9735292860490D5A",
+        "isWeth0": true,
+        "symbol": "BRETT"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x404E927b203375779a6aBD52A2049cE0ADf6609B",
+        "isWeth0": true,
+        "symbol": "BRETT"
       }
     },
-    "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b": {
+    "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b": {
       "BaseSwap": {
         "pairAddr": "0x34fb40820c2D530C35eDc84eD27e13D90e40Ceb1",
         "isWeth0": false,
@@ -67,9 +112,24 @@
         "pairAddr": "0xDB0692b52Ca4F11A7ff8022c91dD1094f28Fb69b",
         "isWeth0": false,
         "symbol": "VIRTUAL"
+      },
+      "UniswapV2": {
+        "pairAddr": "0xE31c372a7Af875b3B5E0F3713B17ef51556da667",
+        "isWeth0": false,
+        "symbol": "VIRTUAL"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x21594b992F68495dD28d605834b58889d0a727c7",
+        "isWeth0": false,
+        "symbol": "VIRTUAL"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x17c715307e410D9d71b8852D02E3864da160BE6A",
+        "isWeth0": false,
+        "symbol": "VIRTUAL"
       }
     },
-    "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb": {
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": {
       "BaseSwap": {
         "pairAddr": "0x0FeB1490f80B6978002c3E501753562f2F2853B2",
         "isWeth0": true,
@@ -84,9 +144,24 @@
         "pairAddr": "0x705758a881827A9466b8293723EB6AE92EfE8FA1",
         "isWeth0": true,
         "symbol": "DAI"
+      },
+      "UniswapV2": {
+        "pairAddr": "0xb2839134B8151964f19f6f3c7D59C70ae52852F5",
+        "isWeth0": true,
+        "symbol": "DAI"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x9287C921f5d920cEeE0d07d7c58d476E46aCC640",
+        "isWeth0": true,
+        "symbol": "DAI"
+      },
+      "SushiSwap": {
+        "pairAddr": "0xd035d4c8f848ddE156ba097fA33DF20f6068E29D",
+        "isWeth0": true,
+        "symbol": "DAI"
       }
     },
-    "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22": {
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": {
       "BaseSwap": {
         "pairAddr": "0x07CFA5Df24fB17486AF0CBf6C910F24253a674D3",
         "isWeth0": false,
@@ -101,9 +176,24 @@
         "pairAddr": "0x9BB646BF0F4Da44bfaF3d899e774DE065731EDFe",
         "isWeth0": false,
         "symbol": "cbETH"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x9c15578cCC8e6530DD1C282e679aa2D63F1be607",
+        "isWeth0": false,
+        "symbol": "cbETH"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x44Ecc644449fC3a9858d2007CaA8CFAa4C561f91",
+        "isWeth0": false,
+        "symbol": "cbETH"
+      },
+      "SushiSwap": {
+        "pairAddr": "0xC8d3Aa9182C29a0BD8cf71Da3e6C2a35C05bBdbB",
+        "isWeth0": false,
+        "symbol": "cbETH"
       }
     },
-    "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452": {
+    "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452": {
       "BaseSwap": {
         "pairAddr": "0x1E4A2FA367b545F1299811DCd314d37700568636",
         "isWeth0": true,
@@ -118,9 +208,24 @@
         "pairAddr": "0x55b58CB62490FCADD45e0C410557d8627D45311e",
         "isWeth0": true,
         "symbol": "wstETH"
+      },
+      "UniswapV2": {
+        "pairAddr": "0xF848c131722ceEC41109597f60be73cCb4Fe74Ed",
+        "isWeth0": true,
+        "symbol": "wstETH"
+      },
+      "Aerodrome": {
+        "pairAddr": "0xA6385c73961dd9C58db2EF0c4EB98cE4B60651e8",
+        "isWeth0": true,
+        "symbol": "wstETH"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x976346bA596e4dC0aF5e5c966553B3f05F8A21b2",
+        "isWeth0": true,
+        "symbol": "wstETH"
       }
     },
-    "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed": {
+    "0x4ed4e862860bed51a9570b96d89af5e1b0efefed": {
       "BaseSwap": {
         "pairAddr": "0x152375ed731bD67717Fe3A12f62a9A2a27f46400",
         "isWeth0": true,
@@ -135,30 +240,85 @@
         "pairAddr": "0xF1bE2eC9411A50f2C25E00d935c2409E7fac3bE9",
         "isWeth0": true,
         "symbol": "DEGEN"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x7C327d692B72f60b28AecEDbcC1BA784712fE7b2",
+        "isWeth0": true,
+        "symbol": "DEGEN"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x2C4909355b0C036840819484c3A882A95659aBf3",
+        "isWeth0": true,
+        "symbol": "DEGEN"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x5636C6F5aDe81B63da945Ba4C9F504C7EAa9EA61",
+        "isWeth0": true,
+        "symbol": "DEGEN"
       }
     },
-    "0x2416092f143378750bb29b79eD961ab195CcEea5": {
+    "0x2416092f143378750bb29b79ed961ab195cceea5": {
       "AlienBase": {
         "pairAddr": "0x44C62162399539Ea00Cdcd1EBd3BC170947Ba1e7",
         "isWeth0": false,
         "symbol": "EZETH"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x4ED6664ac7FD98Ef58788Ea77fF00AC6ED233678",
+        "isWeth0": false,
+        "symbol": "EZETH"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x0C8bF3cb3E1f951B284EF14aa95444be86a33E2f",
+        "isWeth0": false,
+        "symbol": "EZETH"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x38C5c7F3B9Fdb9451dc8E033fdD1306c4AbdE72e",
+        "isWeth0": false,
+        "symbol": "EZETH"
       }
     },
-    "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A": {
+    "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a": {
       "SwapBased": {
         "pairAddr": "0x0e69BeB83Add3925377979E6b29C3222E6537BB5",
         "isWeth0": false,
         "symbol": "WEETH"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x64AAedA9c8A8839933707c6c2FaCd520768AB034",
+        "isWeth0": false,
+        "symbol": "WEETH"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x91F0f34916Ca4E2cCe120116774b0e4fA0cdcaA8",
+        "isWeth0": false,
+        "symbol": "WEETH"
       }
     },
-    "0x1C7a460413dD4e964f96D8dFC56E7223cE88CD85": {
+    "0x1c7a460413dd4e964f96d8dfc56e7223ce88cd85": {
       "BaseSwap": {
         "pairAddr": "0xd12f05177b36f87362D8367972578ccB08c98846",
         "isWeth0": false,
         "symbol": "SEAM"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x41113e05242A211F71b21303c44A2d192f4Ae0a9",
+        "isWeth0": false,
+        "symbol": "SEAM"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x1B00a1aFE48aDB8D8C76b854da22a70011446481",
+        "isWeth0": false,
+        "symbol": "SEAM"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x54cd16E80d9C2B553701463F1b70626202B0AD9F",
+        "isWeth0": false,
+        "symbol": "SEAM"
       }
     },
-    "0x78a087d713Be963Bf307b18F2Ff8122EF9A63ae9": {
+    "0x78a087d713be963bf307b18f2ff8122ef9a63ae9": {
       "BaseSwap": {
         "pairAddr": "0xE80B4F755417FB4baF4dbd23C029db3F62786523",
         "isWeth0": true,
@@ -168,6 +328,101 @@
         "pairAddr": "0x9cb25A93aF1126B8433149eA5361FdD90e4917AA",
         "isWeth0": true,
         "symbol": "BSWAP"
+      },
+      "UniswapV2": {
+        "pairAddr": "0x2f2255208960D2d12D0D3231321CEdc3EbA10828",
+        "isWeth0": true,
+        "symbol": "BSWAP"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x9713D6cE9942976056F60814E2eC458D5F157629",
+        "isWeth0": true,
+        "symbol": "BSWAP"
+      },
+      "SushiSwap": {
+        "pairAddr": "0xE2DF8d8A87BdcDFFe4886572f411DBE6615D4266",
+        "isWeth0": true,
+        "symbol": "BSWAP"
+      }
+    },
+    "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2": {
+      "UniswapV2": {
+        "pairAddr": "0xDf34D53bDAe19AaBCed0a7eDAe79b2c76F095e1f",
+        "isWeth0": true,
+        "symbol": "USDT"
+      },
+      "Aerodrome": {
+        "pairAddr": "0xFFD4Ec4BD2211cBFD58C209FdEcC65F63f2b9e4c",
+        "isWeth0": true,
+        "symbol": "USDT"
+      },
+      "BaseSwap": {
+        "pairAddr": "0xe8E3eD2001E08eA12753C227CA62f69EAe2eeA11",
+        "isWeth0": true,
+        "symbol": "USDT"
+      }
+    },
+    "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": {
+      "UniswapV2": {
+        "pairAddr": "0x4fE4a5F570B046e3704Acd72fef6c508a310D3aA",
+        "isWeth0": true,
+        "symbol": "cbBTC"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x2578365B3dfA7FfE60108e181EFb79FeDdec2319",
+        "isWeth0": true,
+        "symbol": "cbBTC"
+      },
+      "SushiSwap": {
+        "pairAddr": "0x2963c3E74e865b8684EdaB7E78AEb0D0Bc13256e",
+        "isWeth0": true,
+        "symbol": "cbBTC"
+      },
+      "BaseSwap": {
+        "pairAddr": "0x940Ba0b0aff1Bd0B5ffee55597208E843CF0b853",
+        "isWeth0": true,
+        "symbol": "cbBTC"
+      },
+      "AlienBase": {
+        "pairAddr": "0xB45F321fE84C48d1aA310aB9B1B6b90BE148e854",
+        "isWeth0": true,
+        "symbol": "cbBTC"
+      }
+    },
+    "0x0578d8a44db98b23bf096a382e016e29a5ce0ffe": {
+      "UniswapV2": {
+        "pairAddr": "0xa4857d0eDF2f9c0533d0107006967917968a6AC5",
+        "isWeth0": false,
+        "symbol": "HIGHER"
+      },
+      "Aerodrome": {
+        "pairAddr": "0xcEdF590857aE7Fbd4A342Ce9Ee9CA111570A1ca2",
+        "isWeth0": false,
+        "symbol": "HIGHER"
+      }
+    },
+    "0x1bc0c42215582d5a085795f4badbac3ff36d1bcb": {
+      "UniswapV2": {
+        "pairAddr": "0xFc40fd1Ea93a32A3de6837d95b21c0b3e1123575",
+        "isWeth0": false,
+        "symbol": "CLANKER"
+      }
+    },
+    "0x2da56acb9ea78330f947bd57c54119debda7af71": {
+      "UniswapV2": {
+        "pairAddr": "0x712c34C9796d71DC8Fa1A1527Ad7b5fE30b80e4A",
+        "isWeth0": false,
+        "symbol": "MOG"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x4A311ac4563abc30E71D0631C88A6232C1309ac5",
+        "isWeth0": false,
+        "symbol": "MOG"
+      },
+      "AlienBase": {
+        "pairAddr": "0x8FED7De8cdF149Bb8Da22c79957D019fA47a4189",
+        "isWeth0": false,
+        "symbol": "MOG"
       }
     }
   }

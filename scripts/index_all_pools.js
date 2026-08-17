@@ -11,8 +11,10 @@ const multicall = new ethers.Contract(MULTICALL3_ADDRESS, [
 ], provider);
 
 const FACTORIES = {
+  UniswapV2: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
+  Aerodrome: '0x420DD381b31aEf6683db6B902084cB0FFECe40Da',
+  SushiSwap: '0x71524B4f93c58fcbF659783284E38825f0622859',
   BaseSwap: '0xFDa619b6d20975be80A10332cD39b9a4b0FAa8BB',
-  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
   AlienBase: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7'
 };
 
@@ -21,6 +23,9 @@ const REGISTRY_FILE = path.join(process.cwd(), 'data', 'pools_registry.json');
 
 const factoryIface = new ethers.Interface([
   'function getPair(address, address) view returns (address)'
+]);
+const aeroIface = new ethers.Interface([
+  'function getPool(address, address, bool) view returns (address)'
 ]);
 const pairIface = new ethers.Interface([
   'function token0() view returns (address)'
@@ -47,16 +52,10 @@ const CURATED_TOKENS = [
   { symbol: 'SEAM', addr: '0x1c7a460413dd4e964f96d8dfc56e7223ce88cd85' },
   { symbol: 'BSWAP', addr: '0x78a087d713be963bf307b18f2ff8122ef9a63ae9' },
   { symbol: 'ALB', addr: '0x1dd2d631c92b68df9ad7a7a3b155c991d474c29d' },
-  { symbol: 'BASED', addr: '0xd07379a755a8f10d46864d3006cf65279fe6ab33' },
-  { symbol: 'SKI', addr: '0x76a6642c92435b473766b7512224322238472421' },
   { symbol: 'MOG', addr: '0x2da56acb9ea78330f947bd57c54119debda7af71' },
-  { symbol: 'BENJI', addr: '0xbc45647ea894030a4e9801ec03f73194bce29c12' },
   { symbol: 'TYBG', addr: '0x0d97f261b1e88845f81716070093a4b6c7e2e089' },
   { symbol: 'DOGINME', addr: '0x6921b130d297cc43754afba22e5eac0fbf8db75b' },
-  { symbol: 'TN100X', addr: '0x5b5dee44552546ecea05edea0439418363098620' },
-  { symbol: 'ROOST', addr: '0xe1abd004250ac8d1f199421d647e01d094faa180' },
   { symbol: 'EZETH', addr: '0x2416092f143378750bb29b79ed961ab195cceea5' },
-  { symbol: 'RSETH', addr: '0x4186bfc76e2e237523cbc30fd220fe055156b41f' },
   { symbol: 'WEETH', addr: '0x04c0599ae5a44757c0af6f9ec3b93da8976c150a' },
   { symbol: 'SNX', addr: '0x22e6966b799c4d5b13be962e1d117b56327fda66' },
   { symbol: 'CRV', addr: '0x8ee73c484a26106699652b06b27e11285b023421' },
@@ -100,19 +99,27 @@ async function fetchGeckoTokens() {
 
 async function indexAll() {
   const tokenUniverse = await fetchGeckoTokens();
-  console.log(`\n🔍 Querying Multicall3 for WETH pairs across BaseSwap, SwapBased, and AlienBase...`);
+  console.log(`\n🔍 Querying Multicall3 for WETH pairs across ${Object.keys(FACTORIES).join(', ')}...`);
 
   const calls = [];
   const queryMeta = [];
 
   for (const token of tokenUniverse) {
     for (const [dexName, factoryAddr] of Object.entries(FACTORIES)) {
-      calls.push({
-        target: factoryAddr,
-        allowFailure: true,
-        callData: factoryIface.encodeFunctionData('getPair', [WETH, token.addr])
-      });
-      queryMeta.push({ dex: dexName, tokenAddr: token.addr, symbol: token.symbol });
+      if (dexName === 'Aerodrome') {
+        calls.push({
+          target: factoryAddr,
+          allowFailure: true,
+          callData: aeroIface.encodeFunctionData('getPool', [WETH, token.addr, false])
+        });
+      } else {
+        calls.push({
+          target: factoryAddr,
+          allowFailure: true,
+          callData: factoryIface.encodeFunctionData('getPair', [WETH, token.addr])
+        });
+      }
+      queryMeta.push({ dex: dexName, tokenAddr: token.addr.toLowerCase(), symbol: token.symbol });
     }
   }
 
@@ -124,12 +131,14 @@ async function indexAll() {
     const r = results[i];
     const meta = queryMeta[i];
     if (r.success && r.returnData !== '0x') {
-      const decoded = factoryIface.decodeFunctionResult('getPair', r.returnData);
+      const decoded = meta.dex === 'Aerodrome' 
+        ? aeroIface.decodeFunctionResult('getPool', r.returnData)
+        : factoryIface.decodeFunctionResult('getPair', r.returnData);
       const pairAddr = decoded[0];
       if (pairAddr && pairAddr !== ethers.ZeroAddress) {
         validPairs.push({
           dex: meta.dex,
-          tokenAddr: meta.tokenAddr.toLowerCase(),
+          tokenAddr: meta.tokenAddr,
           symbol: meta.symbol,
           pairAddr
         });
@@ -194,6 +203,7 @@ async function indexAll() {
   console.log(`\n🎉 Pool Indexing Complete!`);
   console.log(`   Multi-DEX Candidate Tokens (≥2 DEXs): ${Object.keys(multiDexTokens).length}`);
   console.log(`   Total Cross-DEX Pools Monitored:       ${totalCandidatePools}`);
+  console.log(`   Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')}`);
   console.log(`   Registry saved to: ${REGISTRY_FILE}\n`);
 
   for (const [tAddr, dexMap] of Object.entries(multiDexTokens)) {

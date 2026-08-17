@@ -20,8 +20,9 @@ const multicallContract = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI
 // Verified Standard V2 DEX Factories on Base
 const FACTORIES = {
   UniswapV2: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
+  Aerodrome: '0x420DD381b31aEf6683db6B902084cB0FFECe40Da',
+  SushiSwap: '0x71524B4f93c58fcbF659783284E38825f0622859',
   BaseSwap: '0xFDa619b6d20975be80A10332cD39b9a4b0FAa8BB',
-  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
   AlienBase: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7'
 };
 
@@ -44,6 +45,9 @@ const FACTORY_ABI = [
   'function allPairs(uint256) view returns (address)'
 ];
 const factoryInterface = new ethers.Interface(FACTORY_ABI);
+const aeroInterface = new ethers.Interface([
+  'function getPool(address, address, bool) view returns (address)'
+]);
 const PAIR_ABI = [
   'function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)',
   'function token0() view returns (address)',
@@ -432,11 +436,19 @@ async function initialDiscovery() {
 
   for (const token of CORE_TOKENS) {
     for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
-      calls.push({
-        target: factoryAddr,
-        allowFailure: true,
-        callData: factoryInterface.encodeFunctionData('getPair', [WETH, token.addr.toLowerCase()])
-      });
+      if (dex === 'Aerodrome') {
+        calls.push({
+          target: factoryAddr,
+          allowFailure: true,
+          callData: aeroInterface.encodeFunctionData('getPool', [WETH, token.addr.toLowerCase(), false])
+        });
+      } else {
+        calls.push({
+          target: factoryAddr,
+          allowFailure: true,
+          callData: factoryInterface.encodeFunctionData('getPair', [WETH, token.addr.toLowerCase()])
+        });
+      }
       meta.push({ dex, tokenAddr: token.addr.toLowerCase(), symbol: token.symbol });
     }
   }
@@ -449,7 +461,9 @@ async function initialDiscovery() {
       const r = results[i];
       const m = meta[i];
       if (r.success && r.returnData !== '0x') {
-        const decoded = factoryInterface.decodeFunctionResult('getPair', r.returnData);
+        const decoded = m.dex === 'Aerodrome'
+          ? aeroInterface.decodeFunctionResult('getPool', r.returnData)
+          : factoryInterface.decodeFunctionResult('getPair', r.returnData);
         const pairAddr = decoded[0];
         if (pairAddr && pairAddr !== ethers.ZeroAddress) {
           discoveredList.push({ ...m, pairAddr });

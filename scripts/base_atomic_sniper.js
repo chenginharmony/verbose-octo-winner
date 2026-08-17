@@ -402,8 +402,9 @@ async function main() {
       const [r0, r1] = await pair.getReserves();
       const wethReserve = wethIs0 ? r0 : r1;
 
-      // Golden Meme Snipe Window: 0.20 WETH (~$380) to 150.0 WETH (~$280,000)
-      if (wethReserve < ethers.parseEther('0.20') || wethReserve > ethers.parseEther('150.0')) return;
+      // Golden Meme Snipe Window: 0.05 WETH (~$95) to 300.0 WETH (~$565,000)
+      // Captures Ground-Floor Clanker/Virtuals memes up to Major Trending Breakouts
+      if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) return;
 
       let sym = 'TOKEN';
       try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
@@ -543,7 +544,7 @@ async function main() {
       if (activePositions.has(otherTokenLower)) return;
 
       const wethReserve = wethIs0 ? r0 : r1;
-      if (wethReserve < ethers.parseEther('0.5') || wethReserve > ethers.parseEther('150.0')) return;
+      if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) return;
 
       await evaluateAndEnterPair(pairAddress, t0, t1);
     } catch {}
@@ -584,14 +585,14 @@ async function main() {
         await handlePairCreatedEvent(log);
       }
 
-      // Priority 2: Genuine High-Velocity Momentum Bursts (>= 3 swaps in 30s)
+      // Priority 2: High-Velocity Momentum Bursts
       totalSwapsScanned += swapLogs.length;
       for (const sLog of swapLogs) {
         const pAddr = sLog.address.toLowerCase();
         const count = (recentPoolVelocity.get(pAddr) || 0) + 1;
         recentPoolVelocity.set(pAddr, count);
 
-        if (count >= 3 && !isEntering) {
+        if (count >= 1 && !isEntering) {
           await handleMomentumScalp(sLog.address);
         }
       }

@@ -127,35 +127,27 @@ async function main() {
   console.log(`   🛡️ Safety Reserve:      ${ethers.formatEther(GAS_RESERVE_ETH)} ETH (~$${toUSD(GAS_RESERVE_ETH)} USD)`);
   console.log(`   ⚡ Fixed Micro Entry:   0.0000600 ETH (~$0.1130 USD per trade)`);
   console.log(`   🔒 Anti-Rug Window:     0.25 to 25.0 WETH Liquidity Sweet Spot`);
-  const WORKING_ETH_TARGET = ethers.parseEther('0.000065'); // Fixed $0.11 entry + $0.01 gas reserve
-
-  async function sweepExcessToUsdc() {
+  async function sweepProfitToUsdc(profitWei) {
+    if (!profitWei || profitWei <= ethers.parseEther('0.000005')) return;
     try {
-      const liveBal = await provider.getBalance(wallet.address);
-      if (liveBal > WORKING_ETH_TARGET + ethers.parseEther('0.00002')) {
-        const excess = liveBal - WORKING_ETH_TARGET;
-        const block = await provider.getBlock('latest');
-        const baseFee = block?.baseFeePerGas || 1000000n;
-        const maxPrio = 50000n;
-        const maxFee = (baseFee * 150n) / 100n + maxPrio;
-        const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
+      const block = await provider.getBlock('latest');
+      const baseFee = block?.baseFeePerGas || 1000000n;
+      const maxPrio = 50000n;
+      const maxFee = (baseFee * 150n) / 100n + maxPrio;
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
 
-        process.stdout.write(`\n🏦 [PROFIT VAULT] Sweeping excess +${ethers.formatEther(excess)} ETH (~$${toUSD(excess)} USD) to USDC... `);
-        const usdcTx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
-          1n,
-          [ethers.getAddress(WETH), ethers.getAddress(USDC)],
-          wallet.address,
-          deadline,
-          { value: excess, gasLimit: 150000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
-        );
-        await usdcTx.wait(1);
-        console.log(`✅ Locked into USDC Vault!\n`);
-      }
+      process.stdout.write(`\n🏦 [PROFIT VAULT] Sweeping net trade profit +${ethers.formatEther(profitWei)} ETH (~$${toUSD(profitWei)} USD) to USDC... `);
+      const usdcTx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
+        1n,
+        [ethers.getAddress(WETH), ethers.getAddress(USDC)],
+        wallet.address,
+        deadline,
+        { value: profitWei, gasLimit: 150000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
+      );
+      await usdcTx.wait(1);
+      console.log(`✅ Pure Profit Locked into USDC Vault!\n`);
     } catch {}
   }
-
-  // Initial Vault Sweep if balance has excess
-  await sweepExcessToUsdc();
 
   let stats = {
     totalTrades: 0,
@@ -343,8 +335,10 @@ async function main() {
           activePositions.delete(tokenAddr);
           savePersistedPositions(activePositions);
 
-          // 🏦 AUTO-PROFIT VAULT: Convert 100% of excess profit into stable USDC, leaving only working ETH capital + gas
-          await sweepExcessToUsdc();
+          // 🏦 AUTO-PROFIT VAULT: Convert 100% of winning net trade profit into stable USDC
+          if (grossPnlWei > 0n) {
+            await sweepProfitToUsdc(grossPnlWei);
+          }
 
           if (grossPnlWei > 0n) {
             telegram.notifyTakeProfit(pos.symbol, gainPercent.toFixed(1), ethers.formatEther(currentEthOut), (Number(grossPnlWei)*ETH_USD/1e18).toFixed(4), tx.hash);

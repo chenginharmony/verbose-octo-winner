@@ -34,7 +34,8 @@ const PAIR_ABI = [
   'function token1() view returns (address)'
 ];
 
-const pairsData = []; // { symbol, dex, pairAddr, isWeth0 }
+const activeArbitragePairs = []; // { symbol, dex, pairAddr, isWeth0, tokenAddr }
+const discoveredPairs = {}; // symbol (tokenAddr) -> { DEX_Name: { pairAddr, isWeth0 } }
 
 // Estimated gas cost for the Bread.sol executeArbitrage call (approx 160k gas)
 // On Base, execution + L1 data fee usually ends up around $0.005 - $0.01
@@ -58,17 +59,33 @@ function toUsd(ethWei) {
   return (Number(ethers.formatEther(ethWei)) * 1882.5).toFixed(4);
 }
 
+function updateIntersectionMatrix() {
+  activeArbitragePairs.length = 0; // Clear existing array
+  for (const [tokenAddr, dexes] of Object.entries(discoveredPairs)) {
+    const dexNames = Object.keys(dexes);
+    if (dexNames.length >= 2) { // Exists on multiple DEXs
+      for (const dex of dexNames) {
+        activeArbitragePairs.push({
+          symbol: tokenAddr.substring(0, 6),
+          tokenAddr: tokenAddr,
+          dex: dex,
+          pairAddr: dexes[dex].pairAddr,
+          isWeth0: dexes[dex].isWeth0
+        });
+      }
+    }
+  }
+}
+
 // Dynamically discover all recently active WETH pools across our target factories
 async function setupPairs() {
-  console.log('🔄 Dynamically discovering V2 Pools from the blockchain...');
+  console.log('🔄 Performing Initial Block Scan for V2 Pools...');
   
   const currentBlock = await provider.getBlockNumber();
   const startBlock = currentBlock - 500000; // Scan last 500,000 blocks (~11 days of pools)
   const CHUNK_SIZE = 9999;
   
   const pairCreatedTopic = ethers.id('PairCreated(address,address,address,uint256)');
-  
-  const discoveredPairs = {}; // symbol (token address) -> { DEX_Name: pairAddr }
 
   for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
     process.stdout.write(`   Scanning ${dex} logs... `);
@@ -115,24 +132,55 @@ async function setupPairs() {
     console.log(`Found ${factoryPools} recent WETH pairs.`);
   }
   
-  // Filter for intersection (Token must be on at least 2 DEXs)
-  console.log(`\n🔄 Building cross-DEX intersection matrix...`);
-  for (const [tokenAddr, dexes] of Object.entries(discoveredPairs)) {
-    const dexNames = Object.keys(dexes);
-    if (dexNames.length >= 2) { // Exists on multiple DEXs
-      for (const dex of dexNames) {
-        pairsData.push({
-          symbol: tokenAddr.substring(0, 6), // Use short address as symbol
-          tokenAddr: tokenAddr,
-          dex: dex,
-          pairAddr: dexes[dex].pairAddr,
-          isWeth0: dexes[dex].isWeth0
-        });
+  updateIntersectionMatrix();
+  console.log(`✅ Loaded ${activeArbitragePairs.length} dynamic cross-DEX Liquidity Pools for Arbitrage.\n`);
+  
+  let lastScannedBlock = currentBlock;
+  console.log(`📡 Starting Background Discovery Polling (every 60s)...`);
+  
+  setInterval(async () => {
+    try {
+      const newBlock = await provider.getBlockNumber();
+      if (newBlock <= lastScannedBlock) return;
+      
+      for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
+        try {
+          const logs = await provider.getLogs({
+            address: factoryAddr,
+            topics: [pairCreatedTopic],
+            fromBlock: lastScannedBlock + 1,
+            toBlock: newBlock
+          });
+          
+          for (const log of logs) {
+            const t0 = ethers.getAddress('0x' + log.topics[1].slice(26));
+            const t1 = ethers.getAddress('0x' + log.topics[2].slice(26));
+            const pairAddr = ethers.getAddress('0x' + log.data.slice(26, 66));
+            
+            let targetToken = null;
+            let isWeth0 = false;
+            
+            if (t0.toLowerCase() === WETH.toLowerCase()) { targetToken = t1; isWeth0 = true; }
+            else if (t1.toLowerCase() === WETH.toLowerCase()) { targetToken = t0; isWeth0 = false; }
+            
+            if (targetToken) {
+              if (!discoveredPairs[targetToken]) discoveredPairs[targetToken] = {};
+              if (!discoveredPairs[targetToken][dex]) {
+                discoveredPairs[targetToken][dex] = { pairAddr, isWeth0 };
+                updateIntersectionMatrix();
+                console.log(`\n[DISCOVERY] New WETH pair on ${dex}! Active cross-DEX pools updated to ${activeArbitragePairs.length}.`);
+              }
+            }
+          }
+        } catch (err) {
+          // silent error in background listener
+        }
       }
+      lastScannedBlock = newBlock;
+    } catch (e) {
+      // silent
     }
-  }
-
-  console.log(`✅ Loaded ${pairsData.length} dynamic cross-DEX Liquidity Pools for Arbitrage.\n`);
+  }, 60000); // 60 seconds
 }
 
 async function scan() {
@@ -149,7 +197,7 @@ async function scan() {
       const reservesCache = {}; // dex_tokenAddr -> { rWeth, rToken }
 
       // Fetch sequentially to avoid rate limiting
-      for (const p of pairsData) {
+      for (const p of activeArbitragePairs) {
         try {
           const pair = new ethers.Contract(p.pairAddr, PAIR_ABI, provider);
           const [r0, r1] = await pair.getReserves();
@@ -164,11 +212,11 @@ async function scan() {
       const gasCostEth = await getGasEstimateEth();
       let bestOpp = null;
 
-      // Extract unique tokens from pairsData
-      const uniqueTokens = [...new Set(pairsData.map(p => p.tokenAddr))];
+      // Extract unique tokens from activeArbitragePairs
+      const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
 
       for (const tokenAddr of uniqueTokens) {
-        const tokenPairs = pairsData.filter(p => p.tokenAddr === tokenAddr);
+        const tokenPairs = activeArbitragePairs.filter(p => p.tokenAddr === tokenAddr);
         const dexes = tokenPairs.map(p => p.dex);
 
         for (let i = 0; i < dexes.length; i++) {
@@ -233,11 +281,11 @@ async function scan() {
               }
               if (bestNetProfit > 0n && (!bestOpp || bestNetProfit > bestOpp.netProfit)) {
                 bestOpp = {
-                  symbol: pairsData.find(p => p.tokenAddr === tokenAddr).symbol,
+                  symbol: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr).symbol,
                   tokenAddr: tokenAddr,
                   buyDex, sellDex,
-                  buyReserves: pairsData.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
-                  sellReserves: pairsData.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
+                  buyReserves: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
+                  sellReserves: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
                   spread,
                   input: bestInput,
                   outToken: bestOutToken,

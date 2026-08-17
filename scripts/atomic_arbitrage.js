@@ -9,8 +9,8 @@ const WETH = '0x4200000000000000000000000000000000000006';
 
 const FACTORIES = {
   BaseSwap: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
-  PancakeV3: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-  UniswapV3: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
+  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
+  SushiSwap: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4'
 };
 
 // Removed hardcoded TOKENS list - we will dynamically discover them
@@ -66,8 +66,7 @@ async function setupPairs() {
   const startBlock = currentBlock - 500000; // Scan last 500,000 blocks (~11 days of pools)
   const CHUNK_SIZE = 9999;
   
-  const v2PairCreatedTopic = ethers.id('PairCreated(address,address,address,uint256)');
-  const v3PoolCreatedTopic = ethers.id('PoolCreated(address,address,uint24,int24,address)');
+  const pairCreatedTopic = ethers.id('PairCreated(address,address,address,uint256)');
   
   const discoveredPairs = {}; // symbol (token address) -> { DEX_Name: pairAddr }
 
@@ -78,29 +77,18 @@ async function setupPairs() {
     for (let from = startBlock; from <= currentBlock; from += CHUNK_SIZE) {
       const to = Math.min(from + CHUNK_SIZE - 1, currentBlock);
       try {
-        const topic = dex.includes('V3') ? v3PoolCreatedTopic : v2PairCreatedTopic;
         const logs = await provider.getLogs({
           address: factoryAddr,
-          topics: [topic],
+          topics: [pairCreatedTopic],
           fromBlock: from,
           toBlock: to
         });
         
         for (const log of logs) {
-          // Both V2 and V3 events have token0 as topics[1] and token1 as topics[2]
+          // Topics: [0] Event signature, [1] token0, [2] token1
           const t0 = ethers.getAddress('0x' + log.topics[1].slice(26));
           const t1 = ethers.getAddress('0x' + log.topics[2].slice(26));
-          // In V2, pair address is the first 32 bytes of data.
-          // In V3, pool address is the third indexed parameter (topics[3] or data if not indexed, but in Uniswap/Pancake it's data slice).
-          let pairAddr;
-          if (dex.includes('V3')) {
-              // For V3 (Pancake/Uniswap) 'PoolCreated(address,address,uint24,int24,address)'
-              // token0, token1, fee are indexed. tickSpacing, pool are data.
-              // pool address is the second 32-byte chunk of data.
-              pairAddr = ethers.getAddress('0x' + log.data.slice(90, 130));
-          } else {
-              pairAddr = ethers.getAddress('0x' + log.data.slice(26, 66));
-          }
+          const pairAddr = ethers.getAddress('0x' + log.data.slice(26, 66));
           
           let targetToken = null;
           let isWeth0 = false;

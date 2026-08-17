@@ -8,12 +8,13 @@ const provider = new ethers.JsonRpcProvider(RPC, 8453);
 const WETH = '0x4200000000000000000000000000000000000006';
 
 const FACTORIES = {
-  BaseSwap: '0xF9D5D5B20Ac1A54b4138eBeB2b31131c03eEeeac',
+  BaseSwap: '0xF9D5D5B20ac1a54B4138ebEb2b31131C03EEEeac',
   SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
-  SushiSwap: '0x7152F53f47BfA2cc3eBc76c336b9c99131668e14'
+  SushiSwap: '0x7152f53F47BFa2cc3Ebc76C336B9c99131668e14'
 };
 
 const TOKENS = {
+  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   TOSHI: '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4',
   DEGEN: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed',
   BRETT: '0x532f27101965dd16442E59d40670FaF5eBB142E4',
@@ -200,18 +201,21 @@ async function scan() {
         
         if (bestOpp.netProfit > 0n) {
           console.log(`STATUS: ✅ EXECUTION CANDIDATE (Profitable)`);
-          console.log(`[ARB CANDIDATE] Token: ${bestOpp.symbol} | Route: ${bestOpp.buyDex} -> ${bestOpp.sellDex} | Input: $${toUsd(bestOpp.input)} | Expected Profit: +$${toUsd(bestOpp.netProfit)}`);
           
+          const output = `\n[ARB CANDIDATE] Token: ${bestOpp.symbol} | Route: ${bestOpp.buyDex}->${bestOpp.sellDex} | Input: $${toUsd(bestOpp.input)} | Expected Profit: $${toUsd(bestOpp.netProfit)}\n`;
+          process.stdout.write(output);
           if (!BREAD_ROUTER) {
              console.log(`❌ BREAD_ROUTER_ADDRESS not found in .env. Skipping execution.`);
              return;
           }
 
           // Determine direction
-          const isWeth0Buy = buyReserves.rWeth === buyReserves.r0; // Wait, we don't know r0 vs r1 here cleanly without storing it
-          // Let's refetch to be absolutely sure
-          const p1 = new ethers.Contract(bestOpp.buyReserves.pairAddr, PAIR_ABI, provider);
-          const p2 = new ethers.Contract(bestOpp.sellReserves.pairAddr, PAIR_ABI, provider);
+          const buyReserves = bestOpp.buyReserves;
+          const sellReserves = bestOpp.sellReserves;
+          
+          // Refetch to be absolutely sure
+          const p1 = new ethers.Contract(buyReserves.pairAddr, PAIR_ABI, provider);
+          const p2 = new ethers.Contract(sellReserves.pairAddr, PAIR_ABI, provider);
           
           const t0_1 = await p1.token0();
           const t0_2 = await p2.token0();
@@ -245,11 +249,14 @@ async function scan() {
           }
 
         } else {
-          console.log(`STATUS: ❌ Below minimum profit (Lost to Gas/Impact)`);
+          console.log(`STATUS: ❌ UNPROFITABLE AFTER GAS (Skipping)`);
         }
         console.log(`─────────────────────────────────────────────────`);
       } else {
         process.stdout.write('.');
+        if (currentBlock % 5 === 0) {
+          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: 3 DEXs`);
+        }
       }
 
     } catch (err) {

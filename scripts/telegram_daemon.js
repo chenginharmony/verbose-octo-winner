@@ -90,7 +90,7 @@ function getKeyboard() {
   };
 }
 
-let latestAction = '🟢 Scanning Base blocks for genesis launches & volume surges...';
+let latestAction = '⏳ Waiting for first block...';
 
 async function getStats() {
   const targetAddr = wallet ? wallet.address : (process.env.BASE_BOT_WALLET_ADDRESS || '0x3fE94347b0FDE33947c7b43d80618BA4b99dB647');
@@ -98,12 +98,22 @@ async function getStats() {
   const usdcContract = new ethers.Contract(USDC_ADDR, ['function balanceOf(address) view returns (uint)'], provider);
   const usdcBal = await usdcContract.balanceOf(targetAddr).catch(() => 0n);
 
+  const BREAD_ROUTER = process.env.BREAD_ROUTER_ADDRESS;
+  const WETH = '0x4200000000000000000000000000000000000006';
+  const wethContract = new ethers.Contract(WETH, ['function balanceOf(address) view returns (uint)'], provider);
+  let breadBal = 0n;
+  if (BREAD_ROUTER) {
+    breadBal = await wethContract.balanceOf(BREAD_ROUTER).catch(() => 0n);
+  }
+
   return {
     address: targetAddr,
-    ethBal: ethers.formatEther(ethBal),
-    ethUSD: (Number(ethers.formatEther(ethBal)) * 1882.5).toFixed(4),
-    usdcBal: (Number(usdcBal) / 1e6).toFixed(4),
-    status: isEngineRunning ? '🟢 RUNNING & SNIPING' : '🔴 STOPPED (STANDBY)'
+    ethBal: Number(ethers.formatEther(ethBal)).toFixed(5),
+    ethUSD: (Number(ethers.formatEther(ethBal)) * 2500).toFixed(2),
+    usdcBal: (Number(usdcBal) / 1e6).toFixed(2),
+    breadBal: Number(ethers.formatEther(breadBal)).toFixed(5),
+    breadUSD: (Number(ethers.formatEther(breadBal)) * 2500).toFixed(2),
+    status: isEngineRunning ? '🟢 SCANNING 3 DEXs' : '🔴 STOPPED (STANDBY)'
   };
 }
 
@@ -125,7 +135,8 @@ async function startLiveRadar(chatId) {
     `📡 *Base Block:* #Initializing...\n` +
     `🔄 *Status:* 🟢 DEX Cross-Scanner Active\n` +
     `🛡️ *Atomic Shield:* Execution fully protected via Bread.sol\n` +
-    `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
+    `💰 *Gas Wallet:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
+    `🍞 *Arb Bankroll:* \`${stats.breadBal} WETH\` (~$${stats.breadUSD} USD)\n` +
     `🏦 *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
     `────────────────────────────\n` +
     `⚡ *Status:* 🟢 Arbitrage Engine Running...`;
@@ -159,11 +170,12 @@ async function startLiveRadar(chatId) {
 
       const radarText = `🍣 *ATOMIC ARB LIVE RADAR ⚡*\n────────────────────────────\n` +
         `📡 *Latest Target:* \`${latestAction}\`\n` +
-        `💰 *Trading ETH:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
+        `💰 *Gas Wallet:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
+        `🍞 *Arb Bankroll:* \`${curStats.breadBal} WETH\` (~$${curStats.breadUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
-        `🛡️ *Routing:* BaseSwap ↔️ SwapBased\n` +
+        `🛡️ *Routing:* BaseSwap ↔️ SwapBased ↔️ SushiSwap\n` +
         `────────────────────────────\n` +
-        `⚡ *Status:* 🟢 Engine Actively Scanning`;
+        `⚡ *Status:* ${curStats.status}`;
 
       await telegramCall('editMessageText', {
         chat_id: chatId,
@@ -198,9 +210,9 @@ function startEngine(chatId) {
     addLog(output);
 
     if (output.includes('[ARB SCAN]')) {
-      const match = output.match(/Block #(\d+) \| Token: (.*)/);
+      const match = output.match(/Block #(\d+) \| (.*)/);
       if (match) {
-        latestAction = `Block #${match[1]} | Scanned ${match[2]}`;
+        latestAction = `Block #${match[1]} | ${match[2]}`;
       }
     }
 

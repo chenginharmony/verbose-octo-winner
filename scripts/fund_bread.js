@@ -31,11 +31,11 @@ async function main() {
   const ethBal = await provider.getBalance(wallet.address);
   console.log(`ETH Balance: ${ethers.formatEther(ethBal)} ETH`);
 
-  // We need to keep ~0.001 ETH ($3) for gas fees, fund the rest to Bread
-  const gasReserve = ethers.parseEther('0.001');
+  // We need to keep ~0.0001 ETH ($0.25) for gas fees, fund the rest to Bread
+  const gasReserve = ethers.parseEther('0.0001');
   
   if (ethBal <= gasReserve) {
-    console.error(`\n❌ You do not have enough ETH. Please deposit at least 0.002 ETH to fund the contract and cover gas.`);
+    console.error(`\n❌ You do not have enough ETH. Please deposit at least 0.0002 ETH to fund the contract and cover gas.`);
     process.exit(1);
   }
 
@@ -57,6 +57,7 @@ async function main() {
 
   console.log(`\nTransferring WETH to Bread.sol (${BREAD_ROUTER})...`);
   const tx2 = await wethContract.transfer(BREAD_ROUTER, fundAmount, {
+    gasLimit: 100000n,
     maxFeePerGas: maxFee,
     maxPriorityFeePerGas: 50000n 
   });

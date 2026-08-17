@@ -520,12 +520,19 @@ async function startHotLoop() {
             for (const tp of tokenPairs) {
               const r = reservesCache[`${tp.dex}_${tAddr}`];
               if (r && r.rToken > 0n && r.rWeth > 0n) {
-                const pWeth = Number(ethers.formatEther(r.rWeth)) / Number(ethers.formatEther(r.rToken));
+                const is6Dec = sym.toUpperCase().includes('USD') && !sym.toUpperCase().includes('DAI');
+                const rawPrice = Number(r.rWeth) / Number(r.rToken);
+                const pWeth = is6Dec ? rawPrice * 1e12 : rawPrice;
                 prices.push({ dex: tp.dex, price: pWeth });
-                // If it's a USD stablecoin, price of WETH is 1/pWeth
-                const isUsd = sym.toUpperCase().includes('USD');
-                const displayPrice = isUsd ? (1 / pWeth).toFixed(2) : pWeth.toFixed(6);
-                priceEntries.push(`${tp.dex}: ${isUsd ? '$' : ''}${displayPrice}`);
+
+                let displayStr = '';
+                if (sym.toUpperCase().includes('USD')) {
+                  const ethPrice = (1 / pWeth).toFixed(2);
+                  displayStr = `${tp.dex}: $${ethPrice}`;
+                } else {
+                  displayStr = `${tp.dex}: ${pWeth < 0.0001 ? pWeth.toExponential(2) : pWeth.toFixed(6)} WETH`;
+                }
+                priceEntries.push(displayStr);
               }
             }
 
@@ -539,7 +546,7 @@ async function startHotLoop() {
               }
             }
 
-            console.log(`  🪙 ${sym.padEnd(6)} | ${priceEntries.join(' | ')} (Spread: ${maxSpread.toFixed(3)}%)`);
+            console.log(`  🪙 ${sym.padEnd(8)} | ${priceEntries.join(' | ')} (Spread: ${maxSpread.toFixed(2)}%)`);
           }
         }
       }

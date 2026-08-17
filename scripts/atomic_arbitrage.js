@@ -19,6 +19,7 @@ const multicallContract = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI
 
 // Verified Standard V2 DEX Factories on Base
 const FACTORIES = {
+  UniswapV2: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
   BaseSwap: '0xFDa619b6d20975be80A10332cD39b9a4b0FAa8BB',
   SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
   AlienBase: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7'
@@ -42,6 +43,7 @@ const FACTORY_ABI = [
   'function allPairsLength() view returns (uint256)',
   'function allPairs(uint256) view returns (address)'
 ];
+const factoryInterface = new ethers.Interface(FACTORY_ABI);
 const PAIR_ABI = [
   'function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)',
   'function token0() view returns (address)',
@@ -107,7 +109,9 @@ function loadRegistry() {
     if (fs.existsSync(REGISTRY_FILE)) {
       const data = JSON.parse(fs.readFileSync(REGISTRY_FILE, 'utf8'));
       if (data.tokens) {
-        Object.assign(discoveredPairs, data.tokens);
+        for (const [tAddr, dexMap] of Object.entries(data.tokens)) {
+          discoveredPairs[tAddr.toLowerCase()] = dexMap;
+        }
         lastScannedBlock = data.lastScannedBlock || 0;
         updateIntersectionMatrix();
         console.log(`📂 Loaded persistent registry: ${Object.keys(discoveredPairs).length} discovered tokens, ${activeArbitragePairs.length} cross-DEX pools.`);
@@ -122,12 +126,13 @@ function loadRegistry() {
 function updateIntersectionMatrix() {
   activeArbitragePairs.length = 0;
   for (const [tokenAddr, dexMap] of Object.entries(discoveredPairs)) {
+    const tAddr = tokenAddr.toLowerCase();
     const dexes = Object.keys(dexMap);
     if (dexes.length >= 2) {
       for (const dex of dexes) {
         activeArbitragePairs.push({
-          tokenAddr,
-          symbol: dexMap[dex].symbol || tokenAddr.substring(0, 6),
+          tokenAddr: tAddr,
+          symbol: dexMap[dex].symbol || tAddr.substring(0, 6),
           dex,
           pairAddr: dexMap[dex].pairAddr,
           isWeth0: dexMap[dex].isWeth0
@@ -388,69 +393,107 @@ async function scanFactoryLogs(factoryName, factoryAddr, fromBlock, toBlock) {
   }
 }
 
-// Initial discovery + core bluechip pair discovery
+// Initial discovery + Multicall3 fast batch initialization
 async function initialDiscovery() {
   loadRegistry();
 
   const currentBlock = await provider.getBlockNumber();
   console.log(`\n🔄 Initializing Dynamic Pool Discovery (Chain Head: #${currentBlock})...`);
 
-  const startBlock = lastScannedBlock > 0 ? lastScannedBlock + 1 : Math.max(0, currentBlock - 300000);
-
-  for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
-    console.log(`   Scanning ${dex}...`);
-    await scanFactoryLogs(dex, factoryAddr, startBlock, currentBlock);
-  }
-
-  // Seed core and popular Base tokens
+  // Fast Multicall3 check for CORE tokens across all FACTORIES
   const CORE_TOKENS = [
-    { symbol: 'USDC', addr: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
-    { symbol: 'USDbC', addr: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA' },
-    { symbol: 'DAI', addr: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb' },
-    { symbol: 'cbETH', addr: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22' },
-    { symbol: 'TOSHI', addr: '0xAC3211A50254149e59203673F9217646549E7090' },
-    { symbol: 'DEGEN', addr: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed' },
-    { symbol: 'BRETT', addr: '0x532f27101965dd16442E59d40670FaF5eBB142E4' },
-    { symbol: 'AERO', addr: '0x940181a94A35A4569E4529A3CDfB74e438E73580' },
-    { symbol: 'HIGHER', addr: '0x0578d8A44db98B23BF096A382e016e29a5CE0FFE' },
-    { symbol: 'VIRTUAL', addr: '0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b' },
-    { symbol: 'CLANKER', addr: '0x1bc0c42215582d5A085795f4baDbaC3ff36d1Bcb' },
-    { symbol: 'KEYCAT', addr: '0x9a26F5433671751C3276a26524315446dd1ecc82' },
-    { symbol: 'MOCHI', addr: '0xF6e932Ca12afa26665dC4dDe7e27be02A7669e50' },
-    { symbol: 'NORMIE', addr: '0x7F12d43B53671407868050643494077F55c8429c' },
-    { symbol: 'SEAM', addr: '0x1C7a460413dD4e964f96D8dFC56E7223cE88CD85' },
-    { symbol: 'BSWAP', addr: '0x78a087d713Be963Bf307b18F2Ff8122EF9A63ae9' },
-    { symbol: 'ALB', addr: '0x1dd2d631c92b68df9ad7a7a3b155c991d474c29d' }
+    { symbol: 'USDC', addr: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' },
+    { symbol: 'USDbC', addr: '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca' },
+    { symbol: 'USDT', addr: '0xfde4c96c8593536e31f229ea8f37b2ada2699bb2' },
+    { symbol: 'DAI', addr: '0x50c5725949a6f0c72e6c4a641f24049a917db0cb' },
+    { symbol: 'cbETH', addr: '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22' },
+    { symbol: 'wstETH', addr: '0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452' },
+    { symbol: 'cbBTC', addr: '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf' },
+    { symbol: 'TOSHI', addr: '0xac3211a50254149e59203673f9217646549e7090' },
+    { symbol: 'DEGEN', addr: '0x4ed4e862860bed51a9570b96d89af5e1b0efefed' },
+    { symbol: 'BRETT', addr: '0x532f27101965dd16442e59d40670faf5ebb142e4' },
+    { symbol: 'AERO', addr: '0x940181a94a35a4569e4529a3cdfb74e438e73580' },
+    { symbol: 'HIGHER', addr: '0x0578d8a44db98b23bf096a382e016e29a5ce0ffe' },
+    { symbol: 'VIRTUAL', addr: '0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b' },
+    { symbol: 'CLANKER', addr: '0x1bc0c42215582d5a085795f4badbac3ff36d1bcb' },
+    { symbol: 'KEYCAT', addr: '0x9a26f5433671751c3276a26524315446dd1ecc82' },
+    { symbol: 'MOCHI', addr: '0xf6e932ca12afa26665dc4dde7e27be02a7669e50' },
+    { symbol: 'NORMIE', addr: '0x7f12d43b53671407868050643494077f55c8429c' },
+    { symbol: 'SEAM', addr: '0x1c7a460413dd4e964f96d8dfc56e7223ce88cd85' },
+    { symbol: 'BSWAP', addr: '0x78a087d713be963bf307b18f2ff8122ef9a63ae9' },
+    { symbol: 'ALB', addr: '0x1dd2d631c92b68df9ad7a7a3b155c991d474c29d' },
+    { symbol: 'MOG', addr: '0x2da56acb9ea78330f947bd57c54119debda7af71' },
+    { symbol: 'EZETH', addr: '0x2416092f143378750bb29b79ed961ab195cceea5' },
+    { symbol: 'WEETH', addr: '0x04c0599ae5a44757c0af6f9ec3b93da8976c150a' }
   ];
+
+  const calls = [];
+  const meta = [];
 
   for (const token of CORE_TOKENS) {
     for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
-      if (!discoveredPairs[token.addr] || !discoveredPairs[token.addr][dex]) {
-        try {
-          const factory = new ethers.Contract(factoryAddr, FACTORY_ABI, provider);
-          const pairAddr = await factory.getPair(WETH, token.addr);
-          if (pairAddr && pairAddr !== ethers.ZeroAddress) {
-            const pair = new ethers.Contract(pairAddr, PAIR_ABI, provider);
-            const t0 = await pair.token0();
-            const isWeth0 = t0.toLowerCase() === WETH.toLowerCase();
-            if (!discoveredPairs[token.addr]) discoveredPairs[token.addr] = {};
-            discoveredPairs[token.addr][dex] = {
-              pairAddr,
-              isWeth0,
-              symbol: token.symbol
-            };
-          }
-        } catch (e) {}
+      calls.push({
+        target: factoryAddr,
+        allowFailure: true,
+        callData: factoryInterface.encodeFunctionData('getPair', [WETH, token.addr.toLowerCase()])
+      });
+      meta.push({ dex, tokenAddr: token.addr.toLowerCase(), symbol: token.symbol });
+    }
+  }
+
+  try {
+    const results = await multicallContract.aggregate3(calls);
+    const discoveredList = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const m = meta[i];
+      if (r.success && r.returnData !== '0x') {
+        const decoded = factoryInterface.decodeFunctionResult('getPair', r.returnData);
+        const pairAddr = decoded[0];
+        if (pairAddr && pairAddr !== ethers.ZeroAddress) {
+          discoveredList.push({ ...m, pairAddr });
+        }
       }
     }
+
+    // Check token0 orientation for discovered pairs via Multicall
+    if (discoveredList.length > 0) {
+      const t0Calls = discoveredList.map(p => ({
+        target: p.pairAddr,
+        allowFailure: true,
+        callData: pairInterface.encodeFunctionData('token0')
+      }));
+      const t0Res = await multicallContract.aggregate3(t0Calls);
+
+      for (let i = 0; i < discoveredList.length; i++) {
+        const item = discoveredList[i];
+        const res = t0Res[i];
+        let isWeth0 = true;
+        if (res.success && res.returnData !== '0x') {
+          const decoded = pairInterface.decodeFunctionResult('token0', res.returnData);
+          isWeth0 = decoded[0].toLowerCase() === WETH.toLowerCase();
+        }
+
+        if (!discoveredPairs[item.tokenAddr]) discoveredPairs[item.tokenAddr] = {};
+        discoveredPairs[item.tokenAddr][item.dex] = {
+          pairAddr: item.pairAddr,
+          isWeth0,
+          symbol: item.symbol
+        };
+      }
+    }
+  } catch (err) {
+    // Graceful fallback to persistent registry
   }
 
   lastScannedBlock = currentBlock;
   updateIntersectionMatrix();
   saveRegistry();
 
+  const uniqueDiscovered = Object.keys(discoveredPairs).length;
   console.log(`\n✅ Pool Discovery Complete:`);
-  console.log(`   Total Discovered Tokens: ${Object.keys(discoveredPairs).length}`);
+  console.log(`   Total Discovered Tokens: ${uniqueDiscovered}`);
   console.log(`   Cross-DEX Candidate Pools (≥2 DEXs): ${activeArbitragePairs.length}`);
   console.log(`   Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')}\n`);
 }

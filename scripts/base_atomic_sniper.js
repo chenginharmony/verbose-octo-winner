@@ -381,6 +381,11 @@ async function main() {
     }
   }
 
+  const honeypotBlacklist = new Map([
+    ['0x6eb6b145fcb1c853612d396d58388ebb485bacad', Date.now()], // LIQUIDBGT
+    ['0x1f1c695f6b4a3f8b05f2492cef9474afb6d6ad69', Date.now()], // A1C
+  ]);
+
   let isEntering = false;
 
   async function evaluateAndEnterPair(pairAddress, t0, t1) {
@@ -391,22 +396,23 @@ async function main() {
 
       const wethIs0 = t0.toLowerCase() === WETH.toLowerCase();
       const otherToken = wethIs0 ? t1 : t0;
+      const otherTokenLower = otherToken.toLowerCase();
 
-      if (activePositions.has(otherToken.toLowerCase())) return;
+      if (honeypotBlacklist.has(otherTokenLower)) return;
+      if (activePositions.has(otherTokenLower)) return;
 
       const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
       const [r0, r1] = await pair.getReserves();
       const wethReserve = wethIs0 ? r0 : r1;
 
-      // Golden Meme Snipe Window: 0.25 WETH (~$470) to 25.0 WETH (~$47,000)
-      // Rejects micro $10 scams AND rejects deep $4.7M whale pools (like VVV)
-      if (wethReserve < ethers.parseEther('0.25') || wethReserve > ethers.parseEther('25.0')) return;
+      // Golden Meme Snipe Window: 0.25 WETH (~$470) to 30.0 WETH (~$56,000)
+      if (wethReserve < ethers.parseEther('0.25') || wethReserve > ethers.parseEther('30.0')) return;
 
       let sym = 'TOKEN';
       try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
 
       const wethAddr = ethers.getAddress(WETH);
-      const tokenAddr = ethers.getAddress(otherToken.toLowerCase());
+      const tokenAddr = ethers.getAddress(otherTokenLower);
 
       const ethBal = await provider.getBalance(wallet.address);
       if (ethBal < GAS_RESERVE_ETH + ethers.parseEther('0.000005')) return;
@@ -433,21 +439,27 @@ async function main() {
           { value: entryEth, from: wallet.address }
         );
       } catch (buyErr) {
-        return; // Skip non-tradeable pairs
+        honeypotBlacklist.set(otherTokenLower, Date.now());
+        return; // Skip non-tradeable pairs & cache as honeypot
       }
 
       // Step 2: Simulate SELL Leg & Verify Fair Return (No 100% Honeypot Tax)
       try {
         const estTokens = (await router.getAmountsOut(entryEth, [wethAddr, tokenAddr]))[1];
-        if (estTokens === 0n) return;
+        if (estTokens === 0n) {
+          honeypotBlacklist.set(otherTokenLower, Date.now());
+          return;
+        }
         const estEthBack = (await router.getAmountsOut(estTokens, [tokenAddr, wethAddr]))[1];
         
-        // If sell return is < 70% of entry due to malicious tax, ABORT!
+        // If sell return is < 70% of entry due to malicious tax, ABORT & BLACKLIST!
         if (estEthBack < (entryEth * 70n) / 100n) {
+          honeypotBlacklist.set(otherTokenLower, Date.now());
           return;
         }
       } catch (sellErr) {
-        return; // Malicious token that blocks DEX sells — ABORT!
+        honeypotBlacklist.set(otherTokenLower, Date.now());
+        return; // Malicious token that blocks DEX sells — ABORT & BLACKLIST!
       }
 
       isEntering = true;
@@ -455,41 +467,45 @@ async function main() {
       console.log(`\n────────────────────────────────────────────────────────────────────────────`);
       console.log(`🚀 [NEW BASE LAUNCH DETECTED] Pair: WETH / ${sym}`);
       console.log(`   💧 Pool Liquidity: ${ethers.formatEther(wethReserve)} WETH (~$${toUSD(wethReserve)} USD)`);
-      console.log(`   ⚡ Dynamic Entry:  ${ethers.formatEther(entryEth)} ETH (~$${toUSD(entryEth)} USD) [20% of Wallet]`);
+      console.log(`   ⚡ Dynamic Entry:  ${ethers.formatEther(entryEth)} ETH (~$${toUSD(entryEth)} USD)`);
       console.log(`   📍 Token Address:  ${tokenAddr}`);
 
-      const tx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
+      const buyTx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
         1n,
         [wethAddr, tokenAddr],
         wallet.address,
         deadline,
-        { value: entryEth, gasLimit: 200000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
+        {
+          value: entryEth,
+          gasLimit: 300000n,
+          maxPriorityFeePerGas: maxPrio,
+          maxFeePerGas: maxFee
+        }
       );
-      console.log(`   📤 Tx Hash:        ${tx.hash}`);
-      const receipt = await tx.wait(1);
-      telegram.notifySnipe(sym, tokenAddr, ethers.formatEther(wethReserve), ethers.formatEther(entryEth), tx.hash);
 
-      await ensureApproval(tokenAddr, sym);
+      console.log(`⚡ Buy Tx Broadcasted: ${buyTx.hash}`);
+      const receipt = await buyTx.wait(1);
+      console.log(`🎉 BUY CONFIRMED! Block: ${receipt.blockNumber} (Gas Used: ${receipt.gasUsed.toString()})`);
 
-      const otherContract = new ethers.Contract(otherToken, ERC20_ABI, wallet);
-      const tokenBal = await otherContract.balanceOf(wallet.address);
+      const tokenContract = new ethers.Contract(tokenAddr, ERC20_ABI, wallet);
+      const tokenBal = await tokenContract.balanceOf(wallet.address);
 
-      const targetEthOut = (entryEth * 1035n) / 1000n;
-      activePositions.set(otherToken.toLowerCase(), {
-        pairAddress,
+      activePositions.set(otherTokenLower, {
         symbol: sym,
-        entryEth,
+        tokenAddress: tokenAddr,
+        pairAddress: pairAddress,
+        entryEth: entryEth,
         tokenBalance: tokenBal,
-        targetEthOut,
-        blocksHeld: 0,
+        entryBlock: receipt.blockNumber,
+        peakEthValue: entryEth,
+        blocksHeld: 0
       });
-      savePersistedPositions(activePositions);
 
-      console.log(`   🎯 Take-Profit Target: ${ethers.formatEther(targetEthOut)} ETH (+3.5% = ~$${toUSD(targetEthOut)} USD)`);
-      console.log(`────────────────────────────────────────────────────────────────────────────\n`);
-    } catch (e) {
-      // transient
-    } finally {
+      savePersistedPositions(activePositions);
+      console.log(`🎯 Position Saved: Holding ${ethers.formatEther(tokenBal)} ${sym}`);
+      isEntering = false;
+    } catch (err) {
+      console.log(`⚠️ Entry Error: ${err.message}`);
       isEntering = false;
     }
   }
@@ -523,12 +539,15 @@ async function main() {
 
       const wethIs0 = t0.toLowerCase() === WETH.toLowerCase();
       const otherToken = wethIs0 ? t1 : t0;
+      const otherTokenLower = otherToken.toLowerCase();
+
+      if (honeypotBlacklist.has(otherTokenLower)) return;
+      if (activePositions.has(otherTokenLower)) return;
+
       const wethReserve = wethIs0 ? r0 : r1;
 
       // Momentum Scalp Sweet Spot: 0.5 WETH to 50.0 WETH
       if (wethReserve < ethers.parseEther('0.5') || wethReserve > ethers.parseEther('50.0')) return;
-      if (activePositions.has(otherToken.toLowerCase())) return;
-
       let sym = 'HOT-TOKEN';
       try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
 

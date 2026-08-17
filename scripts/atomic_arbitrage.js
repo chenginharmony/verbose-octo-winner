@@ -55,14 +55,13 @@ const discoveredPairs = {};
 const activeArbitragePairs = []; // Array of { tokenAddr, dex, pairAddr, isWeth0, symbol }
 let lastScannedBlock = 0;
 
-// Flashbots-style discrete volume testing ladder
+// Flashbots-style discrete volume testing ladder (calibrated to bankroll)
 const TEST_VOLUMES = [
-  ethers.parseEther('0.00010'), // ~$0.19
-  ethers.parseEther('0.00025'), // ~$0.47
-  ethers.parseEther('0.00050'), // ~$0.94
-  ethers.parseEther('0.00100'), // ~$1.88
-  ethers.parseEther('0.00200'), // ~$3.76
-  ethers.parseEther('0.00500')  // ~$9.41
+  ethers.parseEther('0.00005'), // ~$0.12
+  ethers.parseEther('0.00010'), // ~$0.25
+  ethers.parseEther('0.00020'), // ~$0.50
+  ethers.parseEther('0.00040'), // ~$1.00
+  ethers.parseEther('0.00080')  // ~$2.00 (within 0.00092 WETH bankroll)
 ];
 
 // Dynamic Gas Estimation
@@ -190,11 +189,12 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
         const r2 = reservesCache[`${d2}_${tokenAddr}`];
 
         if (!r1 || !r2) continue;
-        if (r1.rWeth < ethers.parseEther('0.05') || r2.rWeth < ethers.parseEther('0.05')) continue;
+        if (r1.rWeth < ethers.parseEther('0.002') || r2.rWeth < ethers.parseEther('0.002')) continue;
+        if (r1.rToken <= 0n || r2.rToken <= 0n) continue;
 
-        // Fast probe check
-        const price1 = Number(ethers.formatEther(r1.rWeth)) / Number(ethers.formatEther(r1.rToken));
-        const price2 = Number(ethers.formatEther(r2.rWeth)) / Number(ethers.formatEther(r2.rToken));
+        // Fast probe check (raw ratio: WETH / Token)
+        const price1 = Number(r1.rWeth) / Number(r1.rToken);
+        const price2 = Number(r2.rWeth) / Number(r2.rToken);
 
         let buyDex = null;
         let sellDex = null;

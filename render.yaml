@@ -15,10 +15,10 @@ services:
       - key: BASE_RPC_URL
         value: https://developer-access-mainnet.base.org
       - key: BASE_BOT_WALLET_ADDRESS
-        value: 0x3fE94347b0FDE33947c7b43d80618BA4b99dB647
+        sync: false
       - key: BASE_BOT_PRIVATE_KEY
-        value: 0xc1ecffae315aaeafa23474aac85eb45fb635b01a8daf78da526edaec12235e19
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
-        value: 8260297618:AAFSHAq-Ukpj-3-GbIBQBHU_4FHCmKCUdZo
+        sync: false
       - key: PROFIT_RECIPIENT_WALLET_ADDRESS
-        value: 0xe00681dfeE4644F46c67Ff3283849EFf0Ae06aC8
+        sync: false

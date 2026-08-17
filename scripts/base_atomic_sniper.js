@@ -71,14 +71,16 @@ function loadPersistedPositions() {
       for (const [k, v] of Object.entries(data)) {
         map.set(k, {
           ...v,
-          entryEth: BigInt(v.entryEth),
-          tokenBalance: BigInt(v.tokenBalance),
-          targetEthOut: BigInt(v.targetEthOut),
+          entryEth: BigInt(v.entryEth || '0'),
+          tokenBalance: BigInt(v.tokenBalance || '0'),
+          peakEthValue: BigInt(v.peakEthValue || v.entryEth || '0'),
         });
       }
       return map;
     }
-  } catch {}
+  } catch (err) {
+    console.log('State load error:', err.message);
+  }
   return new Map();
 }
 
@@ -88,13 +90,15 @@ function savePersistedPositions(map) {
     for (const [k, v] of map.entries()) {
       obj[k] = {
         ...v,
-        entryEth: v.entryEth.toString(),
-        tokenBalance: v.tokenBalance.toString(),
-        targetEthOut: v.targetEthOut.toString(),
+        entryEth: v.entryEth ? v.entryEth.toString() : '0',
+        tokenBalance: v.tokenBalance ? v.tokenBalance.toString() : '0',
+        peakEthValue: v.peakEthValue ? v.peakEthValue.toString() : '0',
       };
     }
     fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2), 'utf8');
-  } catch {}
+  } catch (err) {
+    console.log('State save error:', err.message);
+  }
 }
 
 // Global In-Memory Caches & Queues
@@ -517,6 +521,13 @@ async function main() {
   }
 
   startConsumerWorkers();
+
+  // Dedicated Auto-Exit Loop: Continuously checks all active positions every 1.5s
+  setInterval(async () => {
+    if (activePositions.size > 0) {
+      await checkActiveExits();
+    }
+  }, 1500);
 
   // Reset velocity cache every 30s
   setInterval(() => {

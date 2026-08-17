@@ -20,6 +20,7 @@
     "wrap:eth": "node scripts/wrap_eth_and_approve.js",
     "micro:sandwich": "node scripts/micro_sandwich.js",
     "start:atomic": "node scripts/atomic_arbitrage.js",
+    "start": "node scripts/telegram_daemon.js",
     "start:base": "node scripts/base_atomic_sniper.js",
     "start:bot": "node scripts/telegram_daemon.js",
     "mev:trade": "node --max-old-space-size=4096 --import tsx scripts/execute_sandwich_trade_live.ts",

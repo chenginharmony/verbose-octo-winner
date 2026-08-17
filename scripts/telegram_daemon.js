@@ -202,14 +202,14 @@ function startEngine(chatId) {
     addLog(output);
 
     if (output.includes('⏳ Block #')) {
-      const match = output.match(/Block #(\d+) \| Ingest: (\d+)ms \| Latency: (\d+)ms \| 🔄 Swaps: (\d+) \(([0-9.]+)\/s\) \| Queue: (\d+)/);
+      const match = output.match(/Block #(\d+) \| Ingest: (\d+)ms \| Latency: (\d+)ms \| 🔄 Swaps: (\d+) \(([0-9.]+)\/s\) \| Q\(H\/N\): (\d+)\/(\d+) \| Open Pos: (\d+)/);
       if (match) {
         liveBlockNumber = match[1];
         liveIngestDuration = match[2];
         liveDetectLatency = match[3];
         liveSwapsCount = match[4];
         liveSwapRate = match[5];
-        liveCandidateQueue = match[6];
+        liveCandidateQueue = `${match[6]}/${match[7]}`;
       }
     }
 

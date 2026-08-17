@@ -171,14 +171,18 @@ async function updateAllReservesMulticall() {
   return reservesCache;
 }
 
-// Flashbots-style Market Evaluator with Binary Step Optimization
+// Flashbots-style Market Evaluator with Binary Step Optimization and Transparent Telemetry
 function evaluateCrossedMarkets(reservesCache, gasCostEth) {
   let bestOpportunity = null;
+  const evaluations = [];
   const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
 
   for (const tokenAddr of uniqueTokens) {
     const tokenPairs = activeArbitragePairs.filter(p => p.tokenAddr === tokenAddr);
+    const sym = tokenPairs[0].symbol;
     const dexes = tokenPairs.map(p => p.dex);
+
+    let tokenBestEval = null;
 
     for (let i = 0; i < dexes.length; i++) {
       for (let j = i + 1; j < dexes.length; j++) {
@@ -188,9 +192,20 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
         const r1 = reservesCache[`${d1}_${tokenAddr}`];
         const r2 = reservesCache[`${d2}_${tokenAddr}`];
 
-        if (!r1 || !r2) continue;
-        if (r1.rWeth < ethers.parseEther('0.002') || r2.rWeth < ethers.parseEther('0.002')) continue;
-        if (r1.rToken <= 0n || r2.rToken <= 0n) continue;
+        if (!r1 || !r2 || r1.rToken <= 0n || r2.rToken <= 0n) continue;
+
+        // Check minimum liquidity
+        if (r1.rWeth < ethers.parseEther('0.0001') || r2.rWeth < ethers.parseEther('0.0001')) {
+          tokenBestEval = {
+            symbol: sym,
+            tokenAddr,
+            spread: 0,
+            status: 'REJECTED',
+            reason: `Liquidity too shallow (<$0.25 on ${r1.rWeth < r2.rWeth ? d1 : d2})`,
+            details: null
+          };
+          continue;
+        }
 
         // Fast probe check (raw ratio: WETH / Token)
         const price1 = Number(r1.rWeth) / Number(r1.rToken);
@@ -212,66 +227,108 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
           buyReserves = r1; sellReserves = r2;
         }
 
-        // Only evaluate if spread exceeds DEX fees + minimum threshold (0.6% total fees)
-        if (spread > 0.4) {
-          let bestInput = 0n;
-          let bestNetProfit = -1000000000000n;
-          let bestOutToken = 0n;
-          let bestOutWeth = 0n;
+        let bestInput = 0n;
+        let bestGrossProfit = -1000000000000n;
+        let bestNetProfit = -1000000000000n;
+        let bestOutToken = 0n;
+        let bestOutWeth = 0n;
 
-          // Multi-tier ladder evaluation
-          for (const size of TEST_VOLUMES) {
-            const outToken = getAmountOut(size, buyReserves.rWeth, buyReserves.rToken);
-            const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
-            const grossProfit = outWeth - size;
-            const netProfit = grossProfit - gasCostEth;
+        // Multi-tier ladder evaluation
+        for (const size of TEST_VOLUMES) {
+          const outToken = getAmountOut(size, buyReserves.rWeth, buyReserves.rToken);
+          const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
+          const grossProfit = outWeth - size;
+          const netProfit = grossProfit - gasCostEth;
 
-            if (bestInput > 0n && netProfit < bestNetProfit) {
-              // Half-step binary search convergence (Flashbots pattern)
-              const trySize = (size + bestInput) / 2n;
-              const tryOutToken = getAmountOut(trySize, buyReserves.rWeth, buyReserves.rToken);
-              const tryOutWeth = getAmountOut(tryOutToken, sellReserves.rToken, sellReserves.rWeth);
-              const tryNet = (tryOutWeth - trySize) - gasCostEth;
+          if (bestInput > 0n && netProfit < bestNetProfit) {
+            // Half-step binary search convergence
+            const trySize = (size + bestInput) / 2n;
+            const tryOutToken = getAmountOut(trySize, buyReserves.rWeth, buyReserves.rToken);
+            const tryOutWeth = getAmountOut(tryOutToken, sellReserves.rToken, sellReserves.rWeth);
+            const tryGross = tryOutWeth - trySize;
+            const tryNet = tryGross - gasCostEth;
 
-              if (tryNet > bestNetProfit) {
-                bestNetProfit = tryNet;
-                bestInput = trySize;
-                bestOutToken = tryOutToken;
-                bestOutWeth = tryOutWeth;
-              }
-              break;
+            if (tryNet > bestNetProfit) {
+              bestGrossProfit = tryGross;
+              bestNetProfit = tryNet;
+              bestInput = trySize;
+              bestOutToken = tryOutToken;
+              bestOutWeth = tryOutWeth;
             }
-
-            if (netProfit > bestNetProfit) {
-              bestNetProfit = netProfit;
-              bestInput = size;
-              bestOutToken = outToken;
-              bestOutWeth = outWeth;
-            }
+            break;
           }
 
-          if (bestNetProfit > 0n && (!bestOpportunity || bestNetProfit > bestOpportunity.netProfit)) {
-            bestOpportunity = {
-              symbol: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr).symbol,
-              tokenAddr,
-              buyDex,
-              sellDex,
-              buyPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
-              sellPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
-              spread,
-              input: bestInput,
-              outToken: bestOutToken,
-              outWeth: bestOutWeth,
-              gasCost: gasCostEth,
-              netProfit: bestNetProfit
-            };
+          if (netProfit > bestNetProfit) {
+            bestGrossProfit = grossProfit;
+            bestNetProfit = netProfit;
+            bestInput = size;
+            bestOutToken = outToken;
+            bestOutWeth = outWeth;
           }
+        }
+
+        let reason = '';
+        let status = 'REJECTED';
+
+        if (bestNetProfit > 0n) {
+          status = 'PROFITABLE';
+          reason = 'Net profit exceeds gas + DEX fees';
+        } else if (bestGrossProfit <= 0n) {
+          status = 'REJECTED';
+          reason = spread < 0.6 ? `Spread (${spread.toFixed(2)}%) < 0.60% DEX fees` : `Slippage on ${buyDex}/${sellDex} exceeds spread`;
+        } else {
+          status = 'REJECTED';
+          reason = `Gross profit (+$${toUsd(bestGrossProfit)}) < L2 gas (-$${toUsd(gasCostEth)})`;
+        }
+
+        const evalItem = {
+          symbol: sym,
+          tokenAddr,
+          buyDex,
+          sellDex,
+          spread,
+          status,
+          reason,
+          details: {
+            input: bestInput,
+            outToken: bestOutToken,
+            outWeth: bestOutWeth,
+            grossProfit: bestGrossProfit,
+            gasCost: gasCostEth,
+            netProfit: bestNetProfit,
+            buyPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
+            sellPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex)
+          }
+        };
+
+        if (!tokenBestEval || (evalItem.details.netProfit > (tokenBestEval.details?.netProfit || -1000000000000n))) {
+          tokenBestEval = evalItem;
+        }
+
+        if (bestNetProfit > 0n && (!bestOpportunity || bestNetProfit > bestOpportunity.netProfit)) {
+          bestOpportunity = {
+            symbol: sym,
+            tokenAddr,
+            buyDex,
+            sellDex,
+            buyPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
+            sellPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
+            spread,
+            input: bestInput,
+            outToken: bestOutToken,
+            outWeth: bestOutWeth,
+            grossProfit: bestGrossProfit,
+            gasCost: gasCostEth,
+            netProfit: bestNetProfit
+          };
         }
       }
     }
+
+    if (tokenBestEval) evaluations.push(tokenBestEval);
   }
 
-  return bestOpportunity;
+  return { bestOpportunity, evaluations };
 }
 
 // Background Factory Log Scanner
@@ -449,18 +506,21 @@ async function startHotLoop() {
         getGasEstimateEth()
       ]);
 
-      // 2. Flashbots Crossed-Market Evaluation
-      const bestOpp = evaluateCrossedMarkets(reservesCache, gasCostEth);
+      // 2. Flashbots Crossed-Market Evaluation with Full Simulation Trace
+      const { bestOpportunity: bestOpp, evaluations } = evaluateCrossedMarkets(reservesCache, gasCostEth);
 
       if (bestOpp) {
-        console.log(`\n─────────────────────────────────────────────────`);
-        console.log(`[ARB CANDIDATE] Block #${currentBlock} | Token: ${bestOpp.symbol}`);
-        console.log(`Direction:    ${bestOpp.buyDex} ➡️ ${bestOpp.sellDex}`);
+        console.log(`\n═════════════════════════════════════════════════════════════════`);
+        console.log(`🚀 [ARBITRAGE OPPORTUNITY ACCEPTED] Block #${currentBlock} | Token: ${bestOpp.symbol}`);
+        console.log(`═════════════════════════════════════════════════════════════════`);
+        console.log(`Route:        ${bestOpp.buyDex} (Buy) ➡️ ${bestOpp.sellDex} (Sell)`);
         console.log(`Spread:       ${bestOpp.spread.toFixed(2)}%`);
         console.log(`Input:        $${toUsd(bestOpp.input)} (${ethers.formatEther(bestOpp.input)} WETH)`);
-        console.log(`Expected Out: $${toUsd(bestOpp.outWeth)}`);
+        console.log(`Expected Out: $${toUsd(bestOpp.outWeth)} (${ethers.formatEther(bestOpp.outWeth)} WETH)`);
+        console.log(`Gross Profit: +$${toUsd(bestOpp.grossProfit)}`);
         console.log(`Gas Cost:    -$${toUsd(bestOpp.gasCost)}`);
         console.log(`NET PROFIT:   +$${toUsd(bestOpp.netProfit)}`);
+        console.log(`═════════════════════════════════════════════════════════════════`);
 
         if (!breadContract) {
           console.log(`⚠️ Execution skipped: BREAD_ROUTER_ADDRESS or Wallet private key missing.`);
@@ -468,7 +528,7 @@ async function startHotLoop() {
           return;
         }
 
-        console.log(`🚀 [EXECUTION] Firing Atomic Arbitrage Transaction...`);
+        console.log(`⚡ [EXECUTION] Submitting atomic transaction via Bread.sol...`);
         engineState = 'EXECUTING';
 
         try {
@@ -497,7 +557,7 @@ async function startHotLoop() {
 
           console.log(`   Tx Submitted: ${tx.hash}`);
           const receipt = await tx.wait(1);
-          console.log(`   ✅ Arbitrage Mined in Block #${receipt.blockNumber}!`);
+          console.log(`   ✅ Arbitrage Mined on Base in Block #${receipt.blockNumber}!`);
           console.log(`[ARB MINED] Block #${receipt.blockNumber} | Token: ${bestOpp.symbol} | Profit: +$${toUsd(bestOpp.netProfit)} | Tx: ${tx.hash}`);
         } catch (execErr) {
           console.log(`   ❌ Execution Failed: ${execErr.message}`);
@@ -509,44 +569,17 @@ async function startHotLoop() {
         process.stdout.write('.');
         if (currentBlock % 5 === 0) {
           console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')} | Candidates: ${activeArbitragePairs.length} pools`);
+          console.log(`  🔬 Full Opportunity Simulation & Execution Decisions:`);
           
-          const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
-          for (const tAddr of uniqueTokens) {
-            const tokenPairs = activeArbitragePairs.filter(p => p.tokenAddr === tAddr);
-            const sym = tokenPairs[0].symbol;
-            const priceEntries = [];
-            const prices = [];
-
-            for (const tp of tokenPairs) {
-              const r = reservesCache[`${tp.dex}_${tAddr}`];
-              if (r && r.rToken > 0n && r.rWeth > 0n) {
-                const is6Dec = sym.toUpperCase().includes('USD') && !sym.toUpperCase().includes('DAI');
-                const rawPrice = Number(r.rWeth) / Number(r.rToken);
-                const pWeth = is6Dec ? rawPrice * 1e12 : rawPrice;
-                prices.push({ dex: tp.dex, price: pWeth });
-
-                let displayStr = '';
-                if (sym.toUpperCase().includes('USD')) {
-                  const ethPrice = (1 / pWeth).toFixed(2);
-                  displayStr = `${tp.dex}: $${ethPrice}`;
-                } else {
-                  displayStr = `${tp.dex}: ${pWeth < 0.0001 ? pWeth.toExponential(2) : pWeth.toFixed(6)} WETH`;
-                }
-                priceEntries.push(displayStr);
-              }
+          for (const ev of evaluations) {
+            if (ev.details) {
+              const inStr = `$${toUsd(ev.details.input)}`;
+              const outStr = `$${toUsd(ev.details.outWeth)}`;
+              const netStr = (ev.details.netProfit >= 0n ? '+' : '') + `$${toUsd(ev.details.netProfit)}`;
+              console.log(`  🪙 ${ev.symbol.padEnd(8)} | Spread: ${ev.spread.toFixed(2).padStart(5)}% (${ev.buyDex} ➡️ ${ev.sellDex}) | Sim: In ${inStr} ➡️ Out ${outStr} | Net: ${netStr} | [${ev.status}: ${ev.reason}]`);
+            } else {
+              console.log(`  🪙 ${ev.symbol.padEnd(8)} | [${ev.status}: ${ev.reason}]`);
             }
-
-            let maxSpread = 0;
-            if (prices.length >= 2) {
-              for (let a = 0; a < prices.length; a++) {
-                for (let b = a + 1; b < prices.length; b++) {
-                  const sp = Math.abs(prices[a].price - prices[b].price) / Math.min(prices[a].price, prices[b].price) * 100;
-                  if (sp > maxSpread) maxSpread = sp;
-                }
-              }
-            }
-
-            console.log(`  🪙 ${sym.padEnd(8)} | ${priceEntries.join(' | ')} (Spread: ${maxSpread.toFixed(2)}%)`);
           }
         }
       }

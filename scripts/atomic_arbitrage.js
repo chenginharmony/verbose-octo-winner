@@ -63,11 +63,11 @@ let lastScannedBlock = 0;
 
 // Flashbots-style discrete volume testing ladder (calibrated to bankroll)
 const TEST_VOLUMES = [
-  ethers.parseEther('0.00005'), // ~$0.12
-  ethers.parseEther('0.00010'), // ~$0.25
-  ethers.parseEther('0.00020'), // ~$0.50
-  ethers.parseEther('0.00040'), // ~$1.00
-  ethers.parseEther('0.00080')  // ~$2.00 (within 0.00092 WETH bankroll)
+  ethers.parseEther('0.00005'), // ~$0.10
+  ethers.parseEther('0.00010'), // ~$0.20
+  ethers.parseEther('0.00020'), // ~$0.40
+  ethers.parseEther('0.00035'), // ~$0.70
+  ethers.parseEther('0.00055')  // ~$1.10 (within 0.00062 WETH bankroll)
 ];
 
 // Dynamic Gas Estimation

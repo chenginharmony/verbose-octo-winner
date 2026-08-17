@@ -104,7 +104,7 @@ function startEngine(chatId) {
   engineProcess = spawn('node', [scriptPath], {
     cwd: process.cwd(),
     env: { ...process.env, TELEGRAM_CHAT_ID: chatId.toString() },
-    stdio: ['inherit', 'pipe', 'pipe']
+    stdio: 'inherit'
   });
 
   telegramCall('sendMessage', {

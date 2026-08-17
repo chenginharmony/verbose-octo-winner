@@ -398,8 +398,15 @@ async function main() {
       if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
       if (activePositions.has(otherTokenLower)) return;
 
-      const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
-      const [r0, r1] = await pair.getReserves();
+      let r0 = 0n, r1 = 0n;
+      try {
+        const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
+        const reserves = await pair.getReserves();
+        r0 = reserves[0];
+        r1 = reserves[1];
+      } catch {
+        return; // Not a V2 pair, skip cleanly
+      }
       const wethReserve = wethIs0 ? r0 : r1;
 
       // Golden Meme Snipe Window: 0.05 WETH (~$95) to 300.0 WETH (~$565,000)

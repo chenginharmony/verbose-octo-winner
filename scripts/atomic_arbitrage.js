@@ -345,12 +345,25 @@ async function initialDiscovery() {
     await scanFactoryLogs(dex, factoryAddr, startBlock, currentBlock);
   }
 
-  // Seed core bluechip pairs
+  // Seed core and popular Base tokens
   const CORE_TOKENS = [
     { symbol: 'USDC', addr: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
     { symbol: 'USDbC', addr: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA' },
     { symbol: 'DAI', addr: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb' },
-    { symbol: 'cbETH', addr: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22' }
+    { symbol: 'cbETH', addr: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22' },
+    { symbol: 'TOSHI', addr: '0xAC3211A50254149e59203673F9217646549E7090' },
+    { symbol: 'DEGEN', addr: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed' },
+    { symbol: 'BRETT', addr: '0x532f27101965dd16442E59d40670FaF5eBB142E4' },
+    { symbol: 'AERO', addr: '0x940181a94A35A4569E4529A3CDfB74e438E73580' },
+    { symbol: 'HIGHER', addr: '0x0578d8A44db98B23BF096A382e016e29a5CE0FFE' },
+    { symbol: 'VIRTUAL', addr: '0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b' },
+    { symbol: 'CLANKER', addr: '0x1bc0c42215582d5A085795f4baDbaC3ff36d1Bcb' },
+    { symbol: 'KEYCAT', addr: '0x9a26F5433671751C3276a26524315446dd1ecc82' },
+    { symbol: 'MOCHI', addr: '0xF6e932Ca12afa26665dC4dDe7e27be02A7669e50' },
+    { symbol: 'NORMIE', addr: '0x7F12d43B53671407868050643494077F55c8429c' },
+    { symbol: 'SEAM', addr: '0x1C7a460413dD4e964f96D8dFC56E7223cE88CD85' },
+    { symbol: 'BSWAP', addr: '0x78a087d713Be963Bf307b18F2Ff8122EF9A63ae9' },
+    { symbol: 'ALB', addr: '0x1dd2d631c92b68df9ad7a7a3b155c991d474c29d' }
   ];
 
   for (const token of CORE_TOKENS) {

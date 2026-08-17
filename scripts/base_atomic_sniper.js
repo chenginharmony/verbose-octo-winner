@@ -224,6 +224,19 @@ async function main() {
         const tokChk  = ethers.getAddress(tokenAddr);
         const wethChk = ethers.getAddress(WETH);
 
+        if (!pos.tokenBalance || pos.tokenBalance === 0n) {
+          try {
+            const tokenContract = new ethers.Contract(tokChk, ERC20_ABI, provider);
+            pos.tokenBalance = await tokenContract.balanceOf(wallet.address);
+          } catch {}
+        }
+
+        if (!pos.tokenBalance || pos.tokenBalance === 0n) {
+          activePositions.delete(tokenAddr);
+          savePersistedPositions(activePositions);
+          continue;
+        }
+
         let currentEthOut = 0n;
         try {
           const amounts = await router.getAmountsOut(pos.tokenBalance, [tokChk, wethChk]);
@@ -238,18 +251,23 @@ async function main() {
           pos.peakGainPercent = gainPercent;
         }
 
-        const shouldTakeProfit = gainPercent >= 3.5;
-        const shouldTrailingLock = pos.peakGainPercent >= 3.0 && gainPercent <= (pos.peakGainPercent - 1.5);
-        const shouldTimeoutExit = pos.blocksHeld >= 8 && gainPercent >= 1.0;
-        const shouldStopLoss = gainPercent <= -35.0 && pos.blocksHeld >= 12;
+        // Print real-time P&L status
+        console.log(`\n📊 [LIVE POSITION] ${pos.symbol} | Held: ${pos.blocksHeld} blks | Current: ${gainPercent >= 0 ? '+' : ''}${gainPercent.toFixed(1)}% (Peak: +${pos.peakGainPercent.toFixed(1)}%) | Value: ${ethers.formatEther(currentEthOut)} ETH`);
 
-        if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutExit || shouldStopLoss) {
+        const shouldTakeProfit = gainPercent >= 3.0;
+        const shouldTrailingLock = pos.peakGainPercent >= 2.5 && gainPercent <= (pos.peakGainPercent - 1.0);
+        const shouldTimeoutExit = pos.blocksHeld >= 4 && gainPercent >= 0.5;
+        const shouldMaxHoldExit = pos.blocksHeld >= 10;
+        const shouldStopLoss = gainPercent <= -35.0 && pos.blocksHeld >= 8;
+
+        if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutExit || shouldMaxHoldExit || shouldStopLoss) {
           if (pos.isExiting) continue;
           pos.isExiting = true;
 
           const exitLabel = shouldTakeProfit ? `🎯 TAKE-PROFIT HIT (+${gainPercent.toFixed(1)}%)`
             : shouldTrailingLock ? `🔒 TRAILING PROFIT LOCK (+${gainPercent.toFixed(1)}%)`
             : shouldTimeoutExit ? `⏱️ TIMEOUT PROFIT FLIP (+${gainPercent.toFixed(1)}%)`
+            : shouldMaxHoldExit ? `🔄 ROTATION FLIP (+${gainPercent.toFixed(1)}%)`
             : `🛑 STOP-LOSS EXIT (${gainPercent.toFixed(1)}%)`;
 
           console.log(`\n────────────────────────────────────────────────────────────────────────────`);
@@ -263,7 +281,7 @@ async function main() {
           const maxPrio = 50000n;
           const maxFee = (baseFee * 150n) / 100n + maxPrio;
           const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
-          const minEthOut = shouldStopLoss ? 1n : (currentEthOut * 90n) / 100n;
+          const minEthOut = shouldStopLoss ? 1n : (currentEthOut * 85n) / 100n;
 
           const tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
             pos.tokenBalance,
@@ -271,7 +289,7 @@ async function main() {
             [tokChk, wethChk],
             wallet.address,
             deadline,
-            { gasLimit: 250000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
+            { gasLimit: 300000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
           );
 
           console.log(`   📤 Tx Hash:       ${tx.hash}`);
@@ -291,7 +309,10 @@ async function main() {
           stats.totalTrades++;
           if (grossPnlWei > 0n) stats.wins++; else stats.losses++;
         }
-      } catch {}
+      } catch (err) {
+        console.log(`⚠️ Exit Evaluation Warning: ${err.message}`);
+        if (pos) pos.isExiting = false;
+      }
     }
   }
 
@@ -441,8 +462,15 @@ async function main() {
 
       await ensureApproval(tokenAddr, meta.symbol);
 
+      let tokenBal = 0n;
       const tokenContract = new ethers.Contract(tokenAddr, ERC20_ABI, wallet);
-      const tokenBal = await tokenContract.balanceOf(wallet.address);
+      for (let retry = 0; retry < 5; retry++) {
+        try {
+          tokenBal = await tokenContract.balanceOf(wallet.address);
+          if (tokenBal > 0n) break;
+        } catch {}
+        await new Promise(r => setTimeout(r, 250));
+      }
 
       activePositions.set(otherTokenLower, {
         symbol: meta.symbol,
@@ -456,7 +484,7 @@ async function main() {
       });
 
       savePersistedPositions(activePositions);
-      console.log(`🎯 Position Saved: Holding ${ethers.formatEther(tokenBal)} ${meta.symbol}`);
+      console.log(`🎯 Position Saved: Holding ${tokenBal.toString()} ${meta.symbol} (Ready for Auto-Exit Loop)`);
       console.log(`────────────────────────────────────────────────────────────────────────────\n`);
     } catch (err) {
       console.log(`⚠️ Trade Execution Warning: ${err.message}`);

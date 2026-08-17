@@ -1,5 +1,5 @@
 {
-  "lastScannedBlock": 50098499,
+  "lastScannedBlock": 50100239,
   "tokens": {
     "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA": {
       "SwapBased": {
@@ -9,6 +9,11 @@
       },
       "BaseSwap": {
         "pairAddr": "0x41d160033C222E6f3722EC97379867324567d883",
+        "isWeth0": true,
+        "symbol": "USDbC"
+      },
+      "AlienBase": {
+        "pairAddr": "0xeF24722d5daE32Dc155d961561cFFbc5f347EeE7",
         "isWeth0": true,
         "symbol": "USDbC"
       }
@@ -35,6 +40,16 @@
         "pairAddr": "0xDBfC587661Fa53e90569D6882F09d5069f9C9Bc9",
         "isWeth0": true,
         "symbol": "BRETT"
+      },
+      "BaseSwap": {
+        "pairAddr": "0x78b9A3E9B16391dF3A379eA0c5B9c1AEf4B55AB7",
+        "isWeth0": true,
+        "symbol": "BRETT"
+      },
+      "SwapBased": {
+        "pairAddr": "0xA5826174c3E543aaA162FE2Dd468A5824724DB7b",
+        "isWeth0": true,
+        "symbol": "BRETT"
       }
     },
     "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b": {
@@ -42,6 +57,117 @@
         "pairAddr": "0x34fb40820c2D530C35eDc84eD27e13D90e40Ceb1",
         "isWeth0": false,
         "symbol": "VIRTUAL"
+      },
+      "SwapBased": {
+        "pairAddr": "0x32146DABaE304BC3ab0C48036fFC9937d213E401",
+        "isWeth0": false,
+        "symbol": "VIRTUAL"
+      },
+      "AlienBase": {
+        "pairAddr": "0xDB0692b52Ca4F11A7ff8022c91dD1094f28Fb69b",
+        "isWeth0": false,
+        "symbol": "VIRTUAL"
+      }
+    },
+    "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb": {
+      "BaseSwap": {
+        "pairAddr": "0x0FeB1490f80B6978002c3E501753562f2F2853B2",
+        "isWeth0": true,
+        "symbol": "DAI"
+      },
+      "SwapBased": {
+        "pairAddr": "0x18D7EEb9B63664c06251dd8141eC1D0c14f0C012",
+        "isWeth0": true,
+        "symbol": "DAI"
+      },
+      "AlienBase": {
+        "pairAddr": "0x705758a881827A9466b8293723EB6AE92EfE8FA1",
+        "isWeth0": true,
+        "symbol": "DAI"
+      }
+    },
+    "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22": {
+      "BaseSwap": {
+        "pairAddr": "0x07CFA5Df24fB17486AF0CBf6C910F24253a674D3",
+        "isWeth0": false,
+        "symbol": "cbETH"
+      },
+      "SwapBased": {
+        "pairAddr": "0xA5b63920AB791234eadE3d0C23139E21bc63c2f8",
+        "isWeth0": false,
+        "symbol": "cbETH"
+      },
+      "AlienBase": {
+        "pairAddr": "0x9BB646BF0F4Da44bfaF3d899e774DE065731EDFe",
+        "isWeth0": false,
+        "symbol": "cbETH"
+      }
+    },
+    "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452": {
+      "BaseSwap": {
+        "pairAddr": "0x1E4A2FA367b545F1299811DCd314d37700568636",
+        "isWeth0": true,
+        "symbol": "wstETH"
+      },
+      "SwapBased": {
+        "pairAddr": "0x1eE8fEd50773D6599655b1BAb827D4BA9F2EC0A0",
+        "isWeth0": true,
+        "symbol": "wstETH"
+      },
+      "AlienBase": {
+        "pairAddr": "0x55b58CB62490FCADD45e0C410557d8627D45311e",
+        "isWeth0": true,
+        "symbol": "wstETH"
+      }
+    },
+    "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed": {
+      "BaseSwap": {
+        "pairAddr": "0x152375ed731bD67717Fe3A12f62a9A2a27f46400",
+        "isWeth0": true,
+        "symbol": "DEGEN"
+      },
+      "SwapBased": {
+        "pairAddr": "0xCBceb0b6bb2617085D8DFeb45112048F7076a200",
+        "isWeth0": true,
+        "symbol": "DEGEN"
+      },
+      "AlienBase": {
+        "pairAddr": "0xF1bE2eC9411A50f2C25E00d935c2409E7fac3bE9",
+        "isWeth0": true,
+        "symbol": "DEGEN"
+      }
+    },
+    "0x2416092f143378750bb29b79eD961ab195CcEea5": {
+      "AlienBase": {
+        "pairAddr": "0x44C62162399539Ea00Cdcd1EBd3BC170947Ba1e7",
+        "isWeth0": false,
+        "symbol": "EZETH"
+      }
+    },
+    "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A": {
+      "SwapBased": {
+        "pairAddr": "0x0e69BeB83Add3925377979E6b29C3222E6537BB5",
+        "isWeth0": false,
+        "symbol": "WEETH"
+      }
+    },
+    "0x1C7a460413dD4e964f96D8dFC56E7223cE88CD85": {
+      "BaseSwap": {
+        "pairAddr": "0xd12f05177b36f87362D8367972578ccB08c98846",
+        "isWeth0": false,
+        "symbol": "SEAM"
+      }
+    },
+    "0x78a087d713Be963Bf307b18F2Ff8122EF9A63ae9": {
+      "BaseSwap": {
+        "pairAddr": "0xE80B4F755417FB4baF4dbd23C029db3F62786523",
+        "isWeth0": true,
+        "symbol": "BSWAP"
+      },
+      "AlienBase": {
+        "pairAddr": "0x9cb25A93aF1126B8433149eA5361FdD90e4917AA",
+        "isWeth0": true,
+        "symbol": "BSWAP"
       }
     }
   }

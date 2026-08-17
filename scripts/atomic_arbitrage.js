@@ -8,19 +8,16 @@ const provider = new ethers.JsonRpcProvider(RPC, 8453);
 const WETH = '0x4200000000000000000000000000000000000006';
 
 const FACTORIES = {
-  BaseSwap: '0xF9D5D5B20ac1a54B4138ebEb2b31131C03EEEeac',
-  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
-  SushiSwap: '0x7152f53F47BFa2cc3Ebc76C336B9c99131668e14'
+  BaseSwap: '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6',
+  PancakeV3: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  UniswapV3: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
 };
 
-const TOKENS = {
-  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  TOSHI: '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4',
-  DEGEN: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed',
-  BRETT: '0x532f27101965dd16442E59d40670FaF5eBB142E4',
-  HIGHER: '0x0578d8A44db98B23BF096A382e016e29a5Ce0ffe',
-  AERO: '0x940181a94A35A4569E4529A3CDfB74e38FD98631'
-};
+// Removed hardcoded TOKENS list - we will dynamically discover them
+
+// Global state machine for execution
+let engineState = 'IDLE'; // 'IDLE' | 'EXECUTING'
+
 
 const BREAD_ROUTER = process.env.BREAD_ROUTER_ADDRESS;
 const PK = process.env.BASE_BOT_PRIVATE_KEY || process.env.ROBINHOOD_BOT_PRIVATE_KEY;
@@ -61,31 +58,93 @@ function toUsd(ethWei) {
   return (Number(ethers.formatEther(ethWei)) * 1882.5).toFixed(4);
 }
 
+// Dynamically discover all recently active WETH pools across our target factories
 async function setupPairs() {
-  console.log('🔄 Initializing Target Pools...');
-  for (const [symbol, tokenAddr] of Object.entries(TOKENS)) {
-    for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
+  console.log('🔄 Dynamically discovering V2 Pools from the blockchain...');
+  
+  const currentBlock = await provider.getBlockNumber();
+  const startBlock = currentBlock - 500000; // Scan last 500,000 blocks (~11 days of pools)
+  const CHUNK_SIZE = 9999;
+  
+  const v2PairCreatedTopic = ethers.id('PairCreated(address,address,address,uint256)');
+  const v3PoolCreatedTopic = ethers.id('PoolCreated(address,address,uint24,int24,address)');
+  
+  const discoveredPairs = {}; // symbol (token address) -> { DEX_Name: pairAddr }
+
+  for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
+    process.stdout.write(`   Scanning ${dex} logs... `);
+    let factoryPools = 0;
+    
+    for (let from = startBlock; from <= currentBlock; from += CHUNK_SIZE) {
+      const to = Math.min(from + CHUNK_SIZE - 1, currentBlock);
       try {
-        const factory = new ethers.Contract(factoryAddr, FACTORY_ABI, provider);
-        const pairAddr = await factory.getPair(WETH, tokenAddr);
-        if (pairAddr && pairAddr !== ethers.ZeroAddress) {
-          const pair = new ethers.Contract(pairAddr, PAIR_ABI, provider);
-          const t0 = await pair.token0();
-          pairsData.push({
-            symbol,
-            dex,
-            pairAddr,
-            isWeth0: t0.toLowerCase() === WETH.toLowerCase()
-          });
+        const topic = dex.includes('V3') ? v3PoolCreatedTopic : v2PairCreatedTopic;
+        const logs = await provider.getLogs({
+          address: factoryAddr,
+          topics: [topic],
+          fromBlock: from,
+          toBlock: to
+        });
+        
+        for (const log of logs) {
+          // Both V2 and V3 events have token0 as topics[1] and token1 as topics[2]
+          const t0 = ethers.getAddress('0x' + log.topics[1].slice(26));
+          const t1 = ethers.getAddress('0x' + log.topics[2].slice(26));
+          // In V2, pair address is the first 32 bytes of data.
+          // In V3, pool address is the third indexed parameter (topics[3] or data if not indexed, but in Uniswap/Pancake it's data slice).
+          let pairAddr;
+          if (dex.includes('V3')) {
+              // For V3 (Pancake/Uniswap) 'PoolCreated(address,address,uint24,int24,address)'
+              // token0, token1, fee are indexed. tickSpacing, pool are data.
+              // pool address is the second 32-byte chunk of data.
+              pairAddr = ethers.getAddress('0x' + log.data.slice(90, 130));
+          } else {
+              pairAddr = ethers.getAddress('0x' + log.data.slice(26, 66));
+          }
+          
+          let targetToken = null;
+          let isWeth0 = false;
+          
+          if (t0.toLowerCase() === WETH.toLowerCase()) {
+            targetToken = t1;
+            isWeth0 = true;
+          } else if (t1.toLowerCase() === WETH.toLowerCase()) {
+            targetToken = t0;
+            isWeth0 = false;
+          }
+          
+          if (targetToken) {
+            if (!discoveredPairs[targetToken]) discoveredPairs[targetToken] = {};
+            discoveredPairs[targetToken][dex] = { pairAddr, isWeth0 };
+            factoryPools++;
+          }
         }
-      } catch (e) {
-        console.log(`Failed to fetch pair for ${symbol} on ${dex}`);
+      } catch (err) {
+        // Silently skip chunk on error to continue progress
       }
-      // Delay to avoid RPC rate limiting
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 100)); // Rate limit pause
+    }
+    console.log(`Found ${factoryPools} recent WETH pairs.`);
+  }
+  
+  // Filter for intersection (Token must be on at least 2 DEXs)
+  console.log(`\n🔄 Building cross-DEX intersection matrix...`);
+  for (const [tokenAddr, dexes] of Object.entries(discoveredPairs)) {
+    const dexNames = Object.keys(dexes);
+    if (dexNames.length >= 2) { // Exists on multiple DEXs
+      for (const dex of dexNames) {
+        pairsData.push({
+          symbol: tokenAddr.substring(0, 6), // Use short address as symbol
+          tokenAddr: tokenAddr,
+          dex: dex,
+          pairAddr: dexes[dex].pairAddr,
+          isWeth0: dexes[dex].isWeth0
+        });
+      }
     }
   }
-  console.log(`✅ Loaded ${pairsData.length} Liquidity Pools.`);
+
+  console.log(`✅ Loaded ${pairsData.length} dynamic cross-DEX Liquidity Pools for Arbitrage.\n`);
 }
 
 async function scan() {
@@ -98,8 +157,8 @@ async function scan() {
       if (currentBlock <= lastBlock) return;
       lastBlock = currentBlock;
 
-      // Group by symbol to compare DEXs
-      const reservesCache = {}; // dex_symbol -> { rWeth, rToken }
+      // Group by tokenAddr to compare DEXs
+      const reservesCache = {}; // dex_tokenAddr -> { rWeth, rToken }
 
       // Fetch sequentially to avoid rate limiting
       for (const p of pairsData) {
@@ -108,7 +167,7 @@ async function scan() {
           const [r0, r1] = await pair.getReserves();
           const rWeth = p.isWeth0 ? r0 : r1;
           const rToken = p.isWeth0 ? r1 : r0;
-          reservesCache[`${p.dex}_${p.symbol}`] = { rWeth, rToken };
+          reservesCache[`${p.dex}_${p.tokenAddr}`] = { rWeth, rToken };
         } catch (e) {
           // If a single pair fails to fetch, we just skip it for this block
         }
@@ -117,15 +176,20 @@ async function scan() {
       const gasCostEth = await getGasEstimateEth();
       let bestOpp = null;
 
-      for (const symbol of Object.keys(TOKENS)) {
-        const dexes = Object.keys(FACTORIES);
+      // Extract unique tokens from pairsData
+      const uniqueTokens = [...new Set(pairsData.map(p => p.tokenAddr))];
+
+      for (const tokenAddr of uniqueTokens) {
+        const tokenPairs = pairsData.filter(p => p.tokenAddr === tokenAddr);
+        const dexes = tokenPairs.map(p => p.dex);
+
         for (let i = 0; i < dexes.length; i++) {
           for (let j = i + 1; j < dexes.length; j++) {
             const d1 = dexes[i];
             const d2 = dexes[j];
             
-            const r1 = reservesCache[`${d1}_${symbol}`];
-            const r2 = reservesCache[`${d2}_${symbol}`];
+            const r1 = reservesCache[`${d1}_${tokenAddr}`];
+            const r2 = reservesCache[`${d2}_${tokenAddr}`];
             
             if (!r1 || !r2) continue;
             if (r1.rWeth < ethers.parseEther('1') || r2.rWeth < ethers.parseEther('1')) continue; // Ignore low liquidity
@@ -179,21 +243,32 @@ async function scan() {
                   bestOutWeth = outWeth;
                 }
               }
-
-              if (bestNetProfit > 0n || spread > 0.8) {
-                if (!bestOpp || bestNetProfit > bestOpp.netProfit) {
-                  bestOpp = {
-                    symbol, buyDex, sellDex, spread,
-                    input: bestInput, outToken: bestOutToken, outWeth: bestOutWeth,
-                    buyReserves: pairsData.find(p => p.symbol === symbol && p.dex === buyDex),
-                    sellReserves: pairsData.find(p => p.symbol === symbol && p.dex === sellDex),
-                    netProfit: bestNetProfit, gasCost: gasCostEth
-                  };
-                }
+              if (bestNetProfit > 0n && (!bestOpp || bestNetProfit > bestOpp.netProfit)) {
+                bestOpp = {
+                  symbol: pairsData.find(p => p.tokenAddr === tokenAddr).symbol,
+                  tokenAddr: tokenAddr,
+                  buyDex, sellDex,
+                  buyReserves: pairsData.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
+                  sellReserves: pairsData.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
+                  spread,
+                  input: bestInput,
+                  outToken: bestOutToken,
+                  outWeth: bestOutWeth,
+                  gasCost: gasCostEth,
+                  netProfit: bestNetProfit
+                };
               }
             }
           }
         }
+      }
+
+      if (engineState === 'EXECUTING') {
+        process.stdout.write('⏳');
+        if (currentBlock % 5 === 0) {
+          console.log(`\n[ARB SCAN] Block #${currentBlock} | ENGINE LOCKED (Executing Arb...)`);
+        }
+        return; // Skip evaluation while executing
       }
 
       if (bestOpp) {
@@ -235,6 +310,8 @@ async function scan() {
           const maxFee = (baseFee * 150n) / 100n + 50000n;
 
           console.log(`🚀 Firing Atomic Arbitrage Transaction...`);
+          engineState = 'EXECUTING'; // Lock state machine
+          
           try {
             const tx = await breadContract.executeArbitrage(
               bestOpp.buyReserves.pairAddr,
@@ -253,6 +330,8 @@ async function scan() {
             console.log(`[ARB MINED] Block #${receipt.blockNumber} | Token: ${bestOpp.symbol} | Profit: +$${toUsd(bestOpp.netProfit)} | Tx: ${tx.hash}`);
           } catch (execErr) {
             console.log(`   ❌ Execution Failed: ${execErr.message}`);
+          } finally {
+            engineState = 'IDLE'; // Unlock state machine
           }
 
         } else {

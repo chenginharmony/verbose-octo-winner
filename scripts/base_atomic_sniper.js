@@ -411,7 +411,7 @@ async function main() {
       const ethBal = await provider.getBalance(wallet.address);
       if (ethBal < GAS_RESERVE_ETH + ethers.parseEther('0.000005')) return;
 
-      // Fixed Safe Micro-Capital: 0.0000600 ETH (~$0.1130 USD) per trade
+      const deployableEth = ethBal > GAS_RESERVE_ETH ? (ethBal - GAS_RESERVE_ETH) : 0n;
       let entryEth = ethers.parseEther('0.00006');
       if (deployableEth < entryEth) entryEth = deployableEth;
       if (entryEth < ethers.parseEther('0.00001')) return;

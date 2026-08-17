@@ -9,7 +9,8 @@ const WETH = '0x4200000000000000000000000000000000000006';
 
 const FACTORIES = {
   BaseSwap: '0xF9D5D5B20Ac1A54b4138eBeB2b31131c03eEeeac',
-  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300'
+  SwapBased: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
+  SushiSwap: '0x7152F53f47BfA2cc3eBc76c336b9c99131668e14'
 };
 
 const TOKENS = {
@@ -109,70 +110,80 @@ async function scan() {
       let bestOpp = null;
 
       for (const symbol of Object.keys(TOKENS)) {
-        const bs = reservesCache[`BaseSwap_${symbol}`];
-        const sb = reservesCache[`SwapBased_${symbol}`];
-        
-        if (!bs || !sb) continue;
-        if (bs.rWeth < ethers.parseEther('1') || sb.rWeth < ethers.parseEther('1')) continue; // Ignore low liquidity
-
-        const priceBs = Number(ethers.formatEther(bs.rWeth)) / Number(ethers.formatEther(bs.rToken));
-        const priceSb = Number(ethers.formatEther(sb.rWeth)) / Number(ethers.formatEther(sb.rToken));
-
-        let spread = 0;
-        let buyDex = null;
-        let sellDex = null;
-        let buyReserves = null;
-        let sellReserves = null;
-
-        if (priceBs > priceSb) {
-          spread = ((priceBs - priceSb) / priceSb) * 100;
-          buyDex = 'SwapBased'; sellDex = 'BaseSwap';
-          buyReserves = sb; sellReserves = bs;
-        } else {
-          spread = ((priceSb - priceBs) / priceBs) * 100;
-          buyDex = 'BaseSwap'; sellDex = 'SwapBased';
-          buyReserves = bs; sellReserves = sb;
-        }
-
-        if (spread > 0.3) {
-          // Simulate trade sizes
-          const testInputs = [
-            ethers.parseEther('0.00005'), // ~$0.10
-            ethers.parseEther('0.00015'), // ~$0.28
-            ethers.parseEther('0.00025'), // ~$0.47
-            ethers.parseEther('0.00050')  // ~$0.94
-          ];
-
-          let bestInput = 0n;
-          let bestNetProfit = -100000000000n; // negative infinity
-          let bestOutToken = 0n;
-          let bestOutWeth = 0n;
-
-          for (const input of testInputs) {
-            // Leg 1: Buy token with WETH
-            const outToken = getAmountOut(input, buyReserves.rWeth, buyReserves.rToken);
-            // Leg 2: Sell token for WETH
-            const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
+        const dexes = Object.keys(FACTORIES);
+        for (let i = 0; i < dexes.length; i++) {
+          for (let j = i + 1; j < dexes.length; j++) {
+            const d1 = dexes[i];
+            const d2 = dexes[j];
             
-            const grossProfit = outWeth - input;
-            const netProfit = grossProfit - gasCostEth;
+            const r1 = reservesCache[`${d1}_${symbol}`];
+            const r2 = reservesCache[`${d2}_${symbol}`];
+            
+            if (!r1 || !r2) continue;
+            if (r1.rWeth < ethers.parseEther('1') || r2.rWeth < ethers.parseEther('1')) continue; // Ignore low liquidity
 
-            if (netProfit > bestNetProfit) {
-              bestNetProfit = netProfit;
-              bestInput = input;
-              bestOutToken = outToken;
-              bestOutWeth = outWeth;
+            const price1 = Number(ethers.formatEther(r1.rWeth)) / Number(ethers.formatEther(r1.rToken));
+            const price2 = Number(ethers.formatEther(r2.rWeth)) / Number(ethers.formatEther(r2.rToken));
+
+            let spread = 0;
+            let buyDex = null;
+            let sellDex = null;
+            let buyReserves = null;
+            let sellReserves = null;
+
+            if (price1 > price2) {
+              spread = ((price1 - price2) / price2) * 100;
+              buyDex = d2; sellDex = d1;
+              buyReserves = r2; sellReserves = r1;
+            } else {
+              spread = ((price2 - price1) / price1) * 100;
+              buyDex = d1; sellDex = d2;
+              buyReserves = r1; sellReserves = r2;
             }
-          }
 
-          if (bestNetProfit > 0n || spread > 0.8) {
-            bestOpp = {
-              symbol, buyDex, sellDex, spread,
-              input: bestInput, outToken: bestOutToken, outWeth: bestOutWeth,
-              buyReserves: pairsData.find(p => p.symbol === symbol && p.dex === buyDex),
-              sellReserves: pairsData.find(p => p.symbol === symbol && p.dex === sellDex),
-              netProfit: bestNetProfit, gasCost: gasCostEth
-            };
+            if (spread > 0.3) {
+              // Simulate trade sizes
+              const testInputs = [
+                ethers.parseEther('0.00005'), // ~$0.10
+                ethers.parseEther('0.00015'), // ~$0.28
+                ethers.parseEther('0.00025'), // ~$0.47
+                ethers.parseEther('0.00050')  // ~$0.94
+              ];
+
+              let bestInput = 0n;
+              let bestNetProfit = -100000000000n; // negative infinity
+              let bestOutToken = 0n;
+              let bestOutWeth = 0n;
+
+              for (const input of testInputs) {
+                // Leg 1: Buy token with WETH
+                const outToken = getAmountOut(input, buyReserves.rWeth, buyReserves.rToken);
+                // Leg 2: Sell token for WETH
+                const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
+                
+                const grossProfit = outWeth - input;
+                const netProfit = grossProfit - gasCostEth;
+
+                if (netProfit > bestNetProfit) {
+                  bestNetProfit = netProfit;
+                  bestInput = input;
+                  bestOutToken = outToken;
+                  bestOutWeth = outWeth;
+                }
+              }
+
+              if (bestNetProfit > 0n || spread > 0.8) {
+                if (!bestOpp || bestNetProfit > bestOpp.netProfit) {
+                  bestOpp = {
+                    symbol, buyDex, sellDex, spread,
+                    input: bestInput, outToken: bestOutToken, outWeth: bestOutWeth,
+                    buyReserves: pairsData.find(p => p.symbol === symbol && p.dex === buyDex),
+                    sellReserves: pairsData.find(p => p.symbol === symbol && p.dex === sellDex),
+                    netProfit: bestNetProfit, gasCost: gasCostEth
+                  };
+                }
+              }
+            }
           }
         }
       }

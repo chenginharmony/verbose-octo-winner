@@ -44,12 +44,13 @@ class TelegramManager {
     });
   }
 
-  notifySnipe(symbol, tokenAddr, poolWeth, entryEth, txHash) {
+  notifySnipe(symbol, tokenAddr, poolWeth, entryEth, txHash, tokenScore, sizingTier, usdValue) {
     const text = `🚀 *[NEW LAUNCH SNIPED]*\n` +
       `────────────────────────────\n` +
       `🪙 *Token:* \`${symbol}\`\n` +
+      `🎯 *Score:* \`${tokenScore}/100\` (${sizingTier} TIER)\n` +
       `💧 *Pool Liquidity:* \`${poolWeth} WETH\`\n` +
-      `⚡ *Entry Amount:* \`${entryEth} ETH\` (~$0.113 USD)\n` +
+      `⚡ *Dynamic Entry:* \`${entryEth} ETH\` (~$${usdValue} USD)\n` +
       `📍 *Address:* \`${tokenAddr.slice(0, 10)}...${tokenAddr.slice(-6)}\`\n` +
       `🔗 [View on Basescan](https://basescan.org/tx/${txHash})`;
     this.sendMessage(text);

@@ -165,7 +165,7 @@ async function startLiveRadar(chatId) {
         `🎯 *Open Positions:* ${posText}\n` +
         `💰 *Trading ETH:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
-        `🛡️ *Honeypot Shield:* 🟢 ACTIVE ($0.00 spent on scams)\n` +
+        `🛡️ *Sizing Engine:* 🧠 AI Dynamic Scoring (PRIME/STANDARD/DEGEN)\n` +
         `────────────────────────────\n` +
         `⚡ *Status:* 🟢 Async Producer/Consumer Active`;
 
@@ -215,7 +215,7 @@ function startEngine(chatId) {
 
     if (output.includes('[SNIPE OPPORTUNITY EXECUTED]') || output.includes('🚀 [NEW BASE LAUNCH DETECTED]')) {
       const match = output.match(/Pair: WETH \/ ([A-Za-z0-9_$]+)/);
-      latestAction = `🚀 Sniping *${match ? match[1] : 'TOKEN'}* ($0.11 entry)`;
+      latestAction = `🚀 Sniping *${match ? match[1] : 'TOKEN'}* (Dynamic Size)`;
       telegramCall('sendMessage', {
         chat_id: chatId,
         text: `🚀 *[BASE SNIPE OPPORTUNITY EXECUTED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
@@ -301,7 +301,7 @@ async function sendDiagnostic(chatId) {
     `🛡️ *SAFETY & FUNNEL STATUS:*\n` +
     `• *2-Way Honeypot Shield:* 🟢 ACTIVE (>=70% Return Required)\n` +
     `• *Liquidity Bounds:* 0.05 to 300.0 WETH\n` +
-    `• *Entry Sizing:* $0.11 Fixed Micro-Cap\n` +
+    `• *Entry Sizing:* 🧠 AI Dynamic Sizing (PRIME/STANDARD/DEGEN)\n` +
     `• *Active ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
     `• *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
     `────────────────────────────\n` +
@@ -357,7 +357,7 @@ async function handleUpdate(update) {
         `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
         `⚡ *Engine Status:* ${stats.status}\n` +
-        `🛡️ *Entry Size:* $0.11 Fixed Micro-Cap\n────────────────────────────`;
+        `🛡️ *Entry Size:* 🧠 AI Dynamic Sizing\n────────────────────────────`;
       await telegramCall('sendMessage', { chat_id: chatId, text: statusMsg, parse_mode: 'Markdown', reply_markup: getKeyboard() });
     } else if (text === '/logs') {
       await sendLogs(chatId);
@@ -386,7 +386,7 @@ async function handleUpdate(update) {
         `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
         `⚡ *Engine Status:* ${stats.status}\n` +
-        `🛡️ *Entry Size:* $0.11 Fixed Micro-Cap\n────────────────────────────`;
+        `🛡️ *Entry Size:* 🧠 AI Dynamic Sizing\n────────────────────────────`;
       await telegramCall('sendMessage', { chat_id: chatId, text: statusMsg, parse_mode: 'Markdown', reply_markup: getKeyboard() });
     } else if (data === 'vault') {
       const stats = await getStats();
@@ -422,7 +422,7 @@ async function handleUpdate(update) {
     } else if (data === 'settings') {
       const settingsMsg = `⚙️ *SNIPER CONFIGURATION*\n────────────────────────────\n` +
         `• *Target Chain:* Base Mainnet (8453)\n` +
-        `• *Micro Entry Size:* $0.11 (~0.00006 ETH)\n` +
+        `• *AI Entry Sizing:* Dynamic (PRIME / STANDARD / DEGEN)\n` +
         `• *Take-Profit:* +3.5% (Auto-Sweep to USDC)\n` +
         `• *Stop-Loss:* -35% (After 12 blocks)\n` +
         `• *Liquidity Sweet Spot:* 0.25 to 25.0 WETH\n` +

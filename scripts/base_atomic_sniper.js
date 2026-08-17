@@ -677,7 +677,7 @@ async function main() {
       console.log(`⚡ Buy Tx Broadcasted: ${buyTx.hash}`);
       const receipt = await buyTx.wait(1);
       console.log(`🎉 BUY CONFIRMED! Block: ${receipt.blockNumber} (Gas: ${receipt.gasUsed.toString()})`);
-      telegram.notifySnipe(meta.symbol, tokenAddr, ethers.formatEther(wethReserve), ethers.formatEther(entryEth), buyTx.hash);
+      telegram.notifySnipe(meta.symbol, tokenAddr, ethers.formatEther(wethReserve), ethers.formatEther(entryEth), buyTx.hash, tokenScore, sizingTier, toUSD(entryEth));
       telemetry.tradesExecuted++;
 
       await ensureApproval(tokenAddr, meta.symbol);

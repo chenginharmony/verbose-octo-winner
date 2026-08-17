@@ -324,10 +324,8 @@ async function scanFactoryLogs(factoryName, factoryAddr, fromBlock, toBlock) {
     await new Promise(r => setTimeout(r, 60));
   }
 
-  if (wethPairsFound === 0) {
-    console.log(`[DISCOVERY_DIAGNOSTIC] ${factoryName}: 0 WETH pairs in range #${fromBlock}-#${toBlock} (${totalEvents} events).`);
-  } else {
-    console.log(`[DISCOVERY] ${factoryName}: ${wethPairsFound} WETH pairs found.`);
+  if (wethPairsFound > 0) {
+    console.log(`\n[DISCOVERY] ${factoryName}: ${wethPairsFound} new WETH pairs found.`);
   }
 }
 
@@ -510,7 +508,39 @@ async function startHotLoop() {
       } else {
         process.stdout.write('.');
         if (currentBlock % 5 === 0) {
-          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).length} DEXs | Candidates: ${activeArbitragePairs.length}`);
+          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')} | Candidates: ${activeArbitragePairs.length} pools`);
+          
+          const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
+          for (const tAddr of uniqueTokens) {
+            const tokenPairs = activeArbitragePairs.filter(p => p.tokenAddr === tAddr);
+            const sym = tokenPairs[0].symbol;
+            const priceEntries = [];
+            const prices = [];
+
+            for (const tp of tokenPairs) {
+              const r = reservesCache[`${tp.dex}_${tAddr}`];
+              if (r && r.rToken > 0n && r.rWeth > 0n) {
+                const pWeth = Number(ethers.formatEther(r.rWeth)) / Number(ethers.formatEther(r.rToken));
+                prices.push({ dex: tp.dex, price: pWeth });
+                // If it's a USD stablecoin, price of WETH is 1/pWeth
+                const isUsd = sym.toUpperCase().includes('USD');
+                const displayPrice = isUsd ? (1 / pWeth).toFixed(2) : pWeth.toFixed(6);
+                priceEntries.push(`${tp.dex}: ${isUsd ? '$' : ''}${displayPrice}`);
+              }
+            }
+
+            let maxSpread = 0;
+            if (prices.length >= 2) {
+              for (let a = 0; a < prices.length; a++) {
+                for (let b = a + 1; b < prices.length; b++) {
+                  const sp = Math.abs(prices[a].price - prices[b].price) / Math.min(prices[a].price, prices[b].price) * 100;
+                  if (sp > maxSpread) maxSpread = sp;
+                }
+              }
+            }
+
+            console.log(`  🪙 ${sym.padEnd(6)} | ${priceEntries.join(' | ')} (Spread: ${maxSpread.toFixed(3)}%)`);
+          }
         }
       }
     } catch (err) {}

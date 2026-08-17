@@ -161,7 +161,7 @@ async function updateAllReservesMulticall() {
         const r1 = decoded[1];
         const rWeth = p.isWeth0 ? r0 : r1;
         const rToken = p.isWeth0 ? r1 : r0;
-        reservesCache[`${p.dex}_${p.tokenAddr}`] = { rWeth, rToken };
+        reservesCache[`${p.dex}_${p.tokenAddr.toLowerCase()}`] = { rWeth, rToken };
       }
     }
   } catch (err) {
@@ -189,8 +189,8 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
         const d1 = dexes[i];
         const d2 = dexes[j];
 
-        const r1 = reservesCache[`${d1}_${tokenAddr}`];
-        const r2 = reservesCache[`${d2}_${tokenAddr}`];
+        const r1 = reservesCache[`${d1}_${tokenAddr.toLowerCase()}`];
+        const r2 = reservesCache[`${d2}_${tokenAddr.toLowerCase()}`];
 
         if (!r1 || !r2 || r1.rToken <= 0n || r2.rToken <= 0n) continue;
 
@@ -227,11 +227,13 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
           buyReserves = r1; sellReserves = r2;
         }
 
-        let bestInput = 0n;
-        let bestGrossProfit = -1000000000000n;
-        let bestNetProfit = -1000000000000n;
-        let bestOutToken = 0n;
-        let bestOutWeth = 0n;
+        let bestInput = TEST_VOLUMES[0];
+        const initialOutToken = getAmountOut(TEST_VOLUMES[0], buyReserves.rWeth, buyReserves.rToken);
+        const initialOutWeth = getAmountOut(initialOutToken, sellReserves.rToken, sellReserves.rWeth);
+        let bestGrossProfit = initialOutWeth - TEST_VOLUMES[0];
+        let bestNetProfit = bestGrossProfit - gasCostEth;
+        let bestOutToken = initialOutToken;
+        let bestOutWeth = initialOutWeth;
 
         // Multi-tier ladder evaluation
         for (const size of TEST_VOLUMES) {

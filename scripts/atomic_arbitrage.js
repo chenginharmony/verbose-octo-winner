@@ -25,7 +25,7 @@ const wallet = new ethers.Wallet(PK, provider);
 const BREAD_ABI = [
   'function executeArbitrage(address pool1, address pool2, uint256 amountIn, uint256 amountOut1, uint256 amountOut2, bool zeroForOne1, bool zeroForOne2, uint256 minProfit) external returns (uint256)'
 ];
-const breadContract = new ethers.Contract(BREAD_ROUTER, BREAD_ABI, wallet);
+const breadContract = BREAD_ROUTER ? new ethers.Contract(BREAD_ROUTER, BREAD_ABI, wallet) : null;
 
 const FACTORY_ABI = ['function getPair(address, address) view returns (address)'];
 const PAIR_ABI = [

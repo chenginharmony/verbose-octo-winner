@@ -142,12 +142,12 @@ async function scan() {
             }
 
             if (spread > 0.3) {
-              // Simulate trade sizes
+              // Simulate trade sizes starting around the bottom ($1)
               const testInputs = [
-                ethers.parseEther('0.00005'), // ~$0.10
-                ethers.parseEther('0.00015'), // ~$0.28
-                ethers.parseEther('0.00025'), // ~$0.47
-                ethers.parseEther('0.00050')  // ~$0.94
+                ethers.parseEther('0.00010'), // ~$0.20
+                ethers.parseEther('0.00025'), // ~$0.50
+                ethers.parseEther('0.00050'), // ~$1.00
+                ethers.parseEther('0.00100')  // ~$2.00
               ];
 
               let bestInput = 0n;

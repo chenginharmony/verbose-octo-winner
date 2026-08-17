@@ -599,7 +599,7 @@ function startBackgroundDiscovery() {
         }
 
         const results = await multicallContract.aggregate3(calls);
-        let newlyAddedCount = 0;
+        const newlyFoundPairs = [];
 
         for (let i = 0; i < results.length; i++) {
           const r = results[i];
@@ -610,13 +610,40 @@ function startBackgroundDiscovery() {
               : factoryInterface.decodeFunctionResult('getPair', r.returnData);
             const pairAddr = decoded[0];
             if (pairAddr && pairAddr !== ethers.ZeroAddress) {
-              if (!discoveredPairs[m.tokenAddr]) discoveredPairs[m.tokenAddr] = {};
-              discoveredPairs[m.tokenAddr][m.dex] = {
-                pairAddr,
-                isWeth0: true,
-                symbol: m.symbol
-              };
+              newlyFoundPairs.push({
+                dex: m.dex,
+                tokenAddr: m.tokenAddr,
+                symbol: m.symbol,
+                pairAddr
+              });
             }
+          }
+        }
+
+        // Verify token0 orientation on-chain via Multicall3
+        if (newlyFoundPairs.length > 0) {
+          const t0Calls = newlyFoundPairs.map(p => ({
+            target: p.pairAddr,
+            allowFailure: true,
+            callData: pairInterface.encodeFunctionData('token0')
+          }));
+
+          const t0Results = await multicallContract.aggregate3(t0Calls);
+          for (let i = 0; i < newlyFoundPairs.length; i++) {
+            const p = newlyFoundPairs[i];
+            const t0Res = t0Results[i];
+            let isWeth0 = true;
+            if (t0Res.success && t0Res.returnData !== '0x') {
+              const decodedT0 = pairInterface.decodeFunctionResult('token0', t0Res.returnData)[0];
+              isWeth0 = (decodedT0.toLowerCase() === WETH.toLowerCase());
+            }
+
+            if (!discoveredPairs[p.tokenAddr]) discoveredPairs[p.tokenAddr] = {};
+            discoveredPairs[p.tokenAddr][p.dex] = {
+              pairAddr: p.pairAddr,
+              isWeth0,
+              symbol: p.symbol
+            };
           }
         }
 
@@ -674,7 +701,7 @@ async function startHotLoop() {
         console.log(`Spread:       ${bestOpp.spread.toFixed(2)}%`);
         console.log(`Input:        $${toUsd(bestOpp.input)} (${ethers.formatEther(bestOpp.input)} WETH)`);
         console.log(`Expected Out: $${toUsd(bestOpp.outWeth)} (${ethers.formatEther(bestOpp.outWeth)} WETH)`);
-        console.log(`Gross Profit: +$${toUsd(bestGrossProfit || bestOpp.grossProfit)}`);
+        console.log(`Gross Profit: +$${toUsd(bestOpp.grossProfit)}`);
         console.log(`Gas Cost:    -$${toUsd(bestOpp.gasCost)}`);
         console.log(`NET PROFIT:   +$${toUsd(bestOpp.netProfit)}`);
         console.log(`═════════════════════════════════════════════════════════════════`);
@@ -708,6 +735,7 @@ async function startHotLoop() {
               zeroForOne2,
               1n
             );
+            console.log(`   ✅ Pre-Flight Simulation Passed! Executing on-chain...`);
           } catch (simErr) {
             console.log(`   ⚠️ Pre-Flight Simulation Rejected (Safe, 0 Gas Spent): ${simErr.message}`);
             return;

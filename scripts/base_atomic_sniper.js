@@ -388,6 +388,14 @@ async function main() {
 
   let isEntering = false;
 
+  const EXCLUDED_TOKENS = new Set([
+    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // USDC
+    '0x50c5725949a6f0c72e6c4a641f24049a917db0cb', // DAI
+    '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca', // USDbC
+    '0x2ae3f1ec7e1f5be1a0c73f73eedfdd7c030f4742', // cbETH
+    '0x940181a94a35a4569e4529a3cdfb74e38fd98631', // AERO
+  ]);
+
   async function evaluateAndEnterPair(pairAddress, t0, t1) {
     if (isEntering) return;
     try {
@@ -398,6 +406,7 @@ async function main() {
       const otherToken = wethIs0 ? t1 : t0;
       const otherTokenLower = otherToken.toLowerCase();
 
+      if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
       if (honeypotBlacklist.has(otherTokenLower)) return;
       if (activePositions.has(otherTokenLower)) return;
 
@@ -405,8 +414,8 @@ async function main() {
       const [r0, r1] = await pair.getReserves();
       const wethReserve = wethIs0 ? r0 : r1;
 
-      // Golden Meme Snipe Window: 0.25 WETH (~$470) to 30.0 WETH (~$56,000)
-      if (wethReserve < ethers.parseEther('0.25') || wethReserve > ethers.parseEther('30.0')) return;
+      // Golden Meme Snipe Window: 0.25 WETH (~$470) to 100.0 WETH (~$190,000)
+      if (wethReserve < ethers.parseEther('0.25') || wethReserve > ethers.parseEther('100.0')) return;
 
       let sym = 'TOKEN';
       try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
@@ -530,6 +539,11 @@ async function main() {
 
   const recentPoolVelocity = new Map();
 
+  // Reset velocity cache every 30 seconds so old tokens don't accumulate
+  setInterval(() => {
+    recentPoolVelocity.clear();
+  }, 30000);
+
   async function handleMomentumScalp(pairAddress) {
     try {
       const pair = new ethers.Contract(pairAddress, PAIR_ABI, provider);
@@ -541,17 +555,13 @@ async function main() {
       const otherToken = wethIs0 ? t1 : t0;
       const otherTokenLower = otherToken.toLowerCase();
 
+      if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
       if (honeypotBlacklist.has(otherTokenLower)) return;
       if (activePositions.has(otherTokenLower)) return;
 
       const wethReserve = wethIs0 ? r0 : r1;
+      if (wethReserve < ethers.parseEther('0.5') || wethReserve > ethers.parseEther('100.0')) return;
 
-      // Momentum Scalp Sweet Spot: 0.5 WETH to 50.0 WETH
-      if (wethReserve < ethers.parseEther('0.5') || wethReserve > ethers.parseEther('50.0')) return;
-      let sym = 'HOT-TOKEN';
-      try { sym = await new ethers.Contract(otherToken, ERC20_ABI, provider).symbol(); } catch {}
-
-      console.log(`\n🔥 [MOMENTUM SURGE TRIGGERED] Active Volume Burst in ${sym} (${ethers.formatEther(wethReserve)} WETH Pool)`);
       await evaluateAndEnterPair(pairAddress, t0, t1);
     } catch {}
   }
@@ -580,7 +590,7 @@ async function main() {
         provider.getLogs({ fromBlock: from, toBlock: to, topics: [SWAP_TOPIC] }),
       ]);
 
-      // Mode 1: Genesis Launch Sniping
+      // Priority 1: Brand New Genesis Launch Sniping
       for (const log of mintLogs) {
         await handleMintEvent(log);
       }
@@ -591,14 +601,14 @@ async function main() {
         await handlePairCreatedEvent(log);
       }
 
-      // Mode 2: Momentum Velocity Scalper
+      // Priority 2: Genuine High-Velocity Momentum Bursts (>= 3 swaps in 30s)
       totalSwapsScanned += swapLogs.length;
       for (const sLog of swapLogs) {
         const pAddr = sLog.address.toLowerCase();
         const count = (recentPoolVelocity.get(pAddr) || 0) + 1;
         recentPoolVelocity.set(pAddr, count);
 
-        if (count >= 2 && !isEntering) {
+        if (count >= 3 && !isEntering) {
           await handleMomentumScalp(sLog.address);
         }
       }

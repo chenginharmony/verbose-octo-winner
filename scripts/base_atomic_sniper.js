@@ -154,6 +154,7 @@ const highPriorityQueue = []; // Genesis Launches
 const normalPriorityQueue = []; // Momentum Swaps
 const inFlightTokens = new Set(); // Tokens currently being bought or exited
 const lifetimeSnipedTokens = loadSnipedTokens(); // Tokens that have been successfully bought before
+let GLOBAL_TRADE_LOCK = false; // Strict 1-Position Enforcement
 
 // Real-Time Precision Funnel Telemetry
 const telemetry = {
@@ -312,6 +313,7 @@ async function main() {
         activePositions.delete(tokLower);
         savePersistedPositions(activePositions);
         inFlightTokens.delete(tokLower);
+        GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock
         return;
       }
 
@@ -419,6 +421,7 @@ async function main() {
         activePositions.delete(tokLower);
         savePersistedPositions(activePositions);
         inFlightTokens.delete(tokLower);
+        GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock
 
         if (netPnlWei > 0n) {
           await sweepProfitToUsdc(netPnlWei);
@@ -496,6 +499,11 @@ async function main() {
     try {
       const meta = await getOrFetchMetadata(pairAddress, token0, token1);
       if (!meta) return;
+
+      // 🛡️ GLOBAL CONCURRENCY LOCK: Strict 1-Position Enforcement
+      if (activePositions.size > 0 || GLOBAL_TRADE_LOCK) {
+        return; // Silently skip without logging to avoid spam
+      }
 
       otherTokenLower = meta.otherToken.toLowerCase();
       if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
@@ -650,7 +658,8 @@ async function main() {
       }
       telemetry.riskApproved++;
 
-      // 🔒 Acquire In-Flight Lock
+      // 🔒 Acquire Global Trade Lock & In-Flight Lock
+      GLOBAL_TRADE_LOCK = true;
       inFlightTokens.add(otherTokenLower);
 
       // ⚡ EXECUTE REAL ON-CHAIN SNIPE:
@@ -715,7 +724,12 @@ async function main() {
 
     } catch (err) {
       console.log(`⚠️ Trade Execution Warning: ${err.message}`);
-      if (otherTokenLower) inFlightTokens.delete(otherTokenLower);
+      if (otherTokenLower) {
+        inFlightTokens.delete(otherTokenLower);
+        if (!activePositions.has(otherTokenLower)) {
+          GLOBAL_TRADE_LOCK = false; // 🔓 Release lock if we failed to establish a position
+        }
+      }
     } finally {
       const evalDuration = Date.now() - evalStart;
       telemetry.decisionLatencies.push(evalDuration);

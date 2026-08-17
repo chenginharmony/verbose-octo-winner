@@ -45,6 +45,8 @@
     "solc": "^0.8.20"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.0",
     "node-telegram-bot-api": "^2.0.0"
   }
 }

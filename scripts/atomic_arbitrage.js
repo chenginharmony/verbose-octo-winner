@@ -752,27 +752,9 @@ async function startHotLoop() {
         console.log(`─────────────────────────────────────────────────`);
       } else {
         process.stdout.write('.');
-        if (currentBlock % 5 === 0) {
+        if (currentBlock % 10 === 0) {
           const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
-          const notableEvals = evaluations.filter(e => e.spread > 0.3 || (e.details && e.details.grossProfit > 0n));
-          const topSpread = evaluations.reduce((max, e) => e.spread > (max.spread || 0) ? e : max, {});
-
-          const topStr = topSpread.symbol ? `${topSpread.symbol} (${topSpread.spread.toFixed(2)}%)` : 'None (>0.3%)';
-          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: 5 DEXs | Monitored: ${uniqueTokens.length} tokens (${activeArbitragePairs.length} pools) | Top Spread: ${topStr}`);
-          
-          if (notableEvals.length > 0) {
-            console.log(`  🔬 Active Price Dislocation Traces:`);
-            for (const ev of notableEvals) {
-              if (ev.details) {
-                const inStr = `$${toUsd(ev.details.input)}`;
-                const outStr = `$${toUsd(ev.details.outWeth)}`;
-                const netStr = (ev.details.netProfit >= 0n ? '+' : '') + `$${toUsd(ev.details.netProfit)}`;
-                console.log(`  🪙 ${ev.symbol.padEnd(8)} | Spread: ${ev.spread.toFixed(2).padStart(5)}% (${ev.buyDex} ➡️ ${ev.sellDex}) | Sim: In ${inStr} ➡️ Out ${outStr} | Net: ${netStr} | [${ev.status}: ${ev.reason}]`);
-              } else {
-                console.log(`  🪙 ${ev.symbol.padEnd(8)} | Spread: ${ev.spread.toFixed(2).padStart(5)}% | [${ev.status}: ${ev.reason}]`);
-              }
-            }
-          }
+          process.stdout.write(`\n📡 [SCAN HEARTBEAT] Block #${currentBlock} | Active Matrix: 5 DEXs | Monitored: ${uniqueTokens.length} tokens (${activeArbitragePairs.length} pools) | Status: 🟢 SEARCHING\n`);
         }
       }
     } catch (err) {}

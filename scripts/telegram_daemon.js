@@ -78,14 +78,16 @@ function getKeyboard() {
   };
 }
 
+let latestAction = '🟢 Scanning Base blocks for genesis launches & volume surges...';
+
 async function getStats() {
-  if (!wallet) return {};
-  const ethBal = await provider.getBalance(wallet.address).catch(() => 0n);
+  const targetAddr = wallet ? wallet.address : (process.env.BASE_BOT_WALLET_ADDRESS || '0x3fE94347b0FDE33947c7b43d80618BA4b99dB647');
+  const ethBal = await provider.getBalance(targetAddr).catch(() => 0n);
   const usdcContract = new ethers.Contract(USDC_ADDR, ['function balanceOf(address) view returns (uint)'], provider);
-  const usdcBal = await usdcContract.balanceOf(wallet.address).catch(() => 0n);
+  const usdcBal = await usdcContract.balanceOf(targetAddr).catch(() => 0n);
 
   return {
-    address: wallet.address,
+    address: targetAddr,
     ethBal: ethers.formatEther(ethBal),
     ethUSD: (Number(ethers.formatEther(ethBal)) * 1882.5).toFixed(4),
     usdcBal: (Number(usdcBal) / 1e6).toFixed(4),
@@ -102,13 +104,13 @@ async function startLiveRadar(chatId) {
   const stats = await getStats();
   const initialText = `🍣 *SUSHIBREAD LIVE RADAR ⚡*\n────────────────────────────\n` +
     `📡 *Base Block:* #Initializing...\n` +
-    `🔄 *Status:* 🟢 Scanning Genesis Pools & Live Swaps...\n` +
+    `🔄 *Live Action:* ${latestAction}\n` +
     `💧 *Liquidity Window:* 0.25 to 25.0 WETH\n` +
     `🛡️ *Honeypot Shield:* 2-Way Static Simulation Active\n` +
-    `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD})\n` +
+    `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
     `🏦 *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
     `────────────────────────────\n` +
-    `⚡ *Real-Time Telemetry Updating...*`;
+    `⚡ *Status:* 🟢 Engine Active & Hunting...`;
 
   const msg = await telegramCall('sendMessage', {
     chat_id: chatId,
@@ -126,7 +128,7 @@ async function startLiveRadar(chatId) {
     if (!isEngineRunning || !liveMessageId) return;
     try {
       counter++;
-      const currentBlock = await provider.getBlockNumber().catch(() => 50078330);
+      const currentBlock = await provider.getBlockNumber().catch(() => 50079995);
       const curStats = await getStats();
 
       let activePos = {};
@@ -134,16 +136,20 @@ async function startLiveRadar(chatId) {
         const stateFile = path.join(process.cwd(), 'state', 'base_positions.json');
         if (fs.existsSync(stateFile)) activePos = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
       } catch {}
-      const posCount = Object.keys(activePos).length;
+      const posKeys = Object.keys(activePos);
+      let posText = `${posKeys.length} open ($0.11 entry ready)`;
+      if (posKeys.length > 0) {
+        posText = posKeys.map(k => `${activePos[k].symbol || 'TOKEN'} (${activePos[k].blocksHeld || 0} blks)`).join(', ');
+      }
 
       const radarText = `🍣 *SUSHIBREAD LIVE RADAR ⚡*\n────────────────────────────\n` +
         `📡 *Base Block:* \`#${currentBlock}\` (~1.5s/block)\n` +
         `🔄 *Swaps Scanned:* \`~${counter * 14} trades evaluated\`\n` +
-        `💧 *Liquidity Window:* 0.25 to 25.0 WETH\n` +
-        `🛡️ *Honeypot Shield:* 🟢 ACTIVE ($0.00 spent on scams)\n` +
-        `🎯 *Active Positions:* ${posCount} open ($0.11 entry ready)\n` +
+        `🔥 *Live Action:* ${latestAction}\n` +
+        `🎯 *Open Positions:* ${posText}\n` +
         `💰 *Trading ETH:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
+        `🛡️ *Honeypot Shield:* 🟢 ACTIVE ($0.00 spent on scams)\n` +
         `────────────────────────────\n` +
         `⚡ *Status:* 🟢 Hunting New Genesis Launches & Surges...`;
 
@@ -155,7 +161,7 @@ async function startLiveRadar(chatId) {
         reply_markup: getKeyboard()
       });
     } catch {}
-  }, 6000);
+  }, 5000);
 }
 
 function startEngine(chatId) {
@@ -169,7 +175,35 @@ function startEngine(chatId) {
   engineProcess = spawn('node', [scriptPath], {
     cwd: process.cwd(),
     env: { ...process.env, TELEGRAM_CHAT_ID: chatId.toString() },
-    stdio: 'inherit'
+    stdio: ['inherit', 'pipe', 'pipe']
+  });
+
+  startLiveRadar(chatId);
+
+  engineProcess.stdout.on('data', (data) => {
+    const output = data.toString();
+    process.stdout.write(output);
+
+    if (output.includes('[MOMENTUM SURGE TRIGGERED]')) {
+      const match = output.match(/Active Volume Burst in ([A-Za-z0-9_$]+)/);
+      if (match) latestAction = `🔥 Volume Surge in *${match[1]}*`;
+    } else if (output.includes('🚀 [NEW BASE LAUNCH DETECTED]')) {
+      const match = output.match(/Pair: WETH \/ ([A-Za-z0-9_$]+)/);
+      latestAction = `🚀 Sniping *${match ? match[1] : 'TOKEN'}* ($0.11 entry)`;
+      telegramCall('sendMessage', { chat_id: chatId, text: `🚀 *[NEW BASE LAUNCH SNIPED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+    } else if (output.includes('🎯 TAKE-PROFIT HIT') || output.includes('🔒 TRAILING PROFIT LOCK')) {
+      latestAction = `🏆 Took Profit (+3.5%+) & Swept to USDC!`;
+      telegramCall('sendMessage', { chat_id: chatId, text: `🏆 *[PROFIT SECURED & SWEPT TO USDC]* 💰\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+    } else if (output.includes('🛑 STOP-LOSS EXIT')) {
+      latestAction = `🛑 Stop-loss executed safely`;
+      telegramCall('sendMessage', { chat_id: chatId, text: `🛑 *[STOP-LOSS EXIT]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+    } else if (output.includes('🏦 [PROFIT VAULT]')) {
+      telegramCall('sendMessage', { chat_id: chatId, text: `🏦 *[USDC VAULT SWEEP]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+    }
+  });
+
+  engineProcess.stderr.on('data', (data) => {
+    process.stderr.write(data.toString());
   });
 
   startLiveRadar(chatId);

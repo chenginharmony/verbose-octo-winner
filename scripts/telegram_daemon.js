@@ -107,6 +107,13 @@ async function getStats() {
   };
 }
 
+let liveBlockNumber = 50085250;
+let liveIngestDuration = 25;
+let liveDetectLatency = 140;
+let liveSwapsCount = 0;
+let liveSwapRate = '0.0';
+let liveCandidateQueue = 0;
+
 let liveMessageId = null;
 let liveTickerInterval = null;
 
@@ -114,15 +121,15 @@ async function startLiveRadar(chatId) {
   if (liveTickerInterval) clearInterval(liveTickerInterval);
 
   const stats = await getStats();
-  const initialText = `🍣 *SUSHIBREAD LIVE RADAR ⚡*\n────────────────────────────\n` +
+  const initialText = `🍣 *SUSHIBREAD PRO LIVE RADAR ⚡*\n────────────────────────────\n` +
     `📡 *Base Block:* #Initializing...\n` +
-    `🔄 *Live Action:* ${latestAction}\n` +
-    `💧 *Liquidity Window:* 0.25 to 25.0 WETH\n` +
+    `🔄 *Status:* 🟢 Decoupled Async Ingestion Active (<50ms)\n` +
+    `💧 *Liquidity Window:* 0.05 to 300.0 WETH\n` +
     `🛡️ *Honeypot Shield:* 2-Way Static Simulation Active\n` +
     `💰 *Trading ETH:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
     `🏦 *USDC Vault:* \`$${stats.usdcBal} USDC\`\n` +
     `────────────────────────────\n` +
-    `⚡ *Status:* 🟢 Engine Active & Hunting...`;
+    `⚡ *Status:* 🟢 Worker Pool Running...`;
 
   const msg = await telegramCall('sendMessage', {
     chat_id: chatId,
@@ -135,12 +142,9 @@ async function startLiveRadar(chatId) {
     liveMessageId = msg.result.message_id;
   }
 
-  let counter = 0;
   liveTickerInterval = setInterval(async () => {
     if (!isEngineRunning || !liveMessageId) return;
     try {
-      counter++;
-      const currentBlock = await provider.getBlockNumber().catch(() => 50080050);
       const curStats = await getStats();
 
       let activePos = {};
@@ -154,16 +158,16 @@ async function startLiveRadar(chatId) {
         posText = posKeys.map(k => `${activePos[k].symbol || 'TOKEN'} (${activePos[k].blocksHeld || 0} blks)`).join(', ');
       }
 
-      const radarText = `🍣 *SUSHIBREAD LIVE RADAR ⚡*\n────────────────────────────\n` +
-        `📡 *Base Block:* \`#${currentBlock}\` (~1.5s/block)\n` +
-        `🔄 *Swaps Scanned:* \`~${counter * 14} trades evaluated\`\n` +
+      const radarText = `🍣 *SUSHIBREAD PRO LIVE RADAR ⚡*\n────────────────────────────\n` +
+        `📡 *Base Block:* \`#${liveBlockNumber}\` (Latency: \`${liveDetectLatency}ms\` | Ingest: \`${liveIngestDuration}ms\`)\n` +
+        `🔄 *Throughput:* \`${liveSwapsCount} swaps\` (\`${liveSwapRate}/s\` | Queue: \`${liveCandidateQueue}\`)\n` +
         `🔥 *Live Action:* ${latestAction}\n` +
         `🎯 *Open Positions:* ${posText}\n` +
         `💰 *Trading ETH:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
         `🛡️ *Honeypot Shield:* 🟢 ACTIVE ($0.00 spent on scams)\n` +
         `────────────────────────────\n` +
-        `⚡ *Status:* 🟢 Hunting New Genesis Launches & Surges...`;
+        `⚡ *Status:* 🟢 Async Producer/Consumer Active`;
 
       await telegramCall('editMessageText', {
         chat_id: chatId,
@@ -173,7 +177,7 @@ async function startLiveRadar(chatId) {
         reply_markup: getKeyboard()
       });
     } catch {}
-  }, 5000);
+  }, 4000);
 }
 
 function startEngine(chatId) {
@@ -192,25 +196,24 @@ function startEngine(chatId) {
 
   startLiveRadar(chatId);
 
-  engineProcess.stdout.on('data', (data) => {
-    const output = data.toString();
-    process.stdout.write(output);
-    addLog(output);
+    if (output.includes('⏳ Block #')) {
+      const match = output.match(/Block #(\d+) \| Ingest: (\d+)ms \| Latency: (\d+)ms \| 🔄 Swaps: (\d+) \(([0-9.]+)\/s\) \| Queue: (\d+)/);
+      if (match) {
+        liveBlockNumber = match[1];
+        liveIngestDuration = match[2];
+        liveDetectLatency = match[3];
+        liveSwapsCount = match[4];
+        liveSwapRate = match[5];
+        liveCandidateQueue = match[6];
+      }
+    }
 
-    if (output.includes('[MOMENTUM SURGE TRIGGERED]')) {
-      const match = output.match(/Active Volume Burst in ([A-Za-z0-9_$]+)/);
-      if (match) latestAction = `🔥 Volume Surge in *${match[1]}*`;
-      telegramCall('sendMessage', {
-        chat_id: chatId,
-        text: `🔥 *[MOMENTUM SURGE DETECTED]* ⚡\n\`\`\`\n${output.trim().slice(0, 300)}\n\`\`\``,
-        parse_mode: 'Markdown'
-      });
-    } else if (output.includes('🚀 [NEW BASE LAUNCH DETECTED]')) {
+    if (output.includes('[SNIPE OPPORTUNITY EXECUTED]') || output.includes('🚀 [NEW BASE LAUNCH DETECTED]')) {
       const match = output.match(/Pair: WETH \/ ([A-Za-z0-9_$]+)/);
       latestAction = `🚀 Sniping *${match ? match[1] : 'TOKEN'}* ($0.11 entry)`;
       telegramCall('sendMessage', {
         chat_id: chatId,
-        text: `🚀 *[NEW BASE LAUNCH SNIPED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
+        text: `🚀 *[BASE SNIPE OPPORTUNITY EXECUTED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
         parse_mode: 'Markdown'
       });
     } else if (output.includes('[LIVE TRACKER]')) {

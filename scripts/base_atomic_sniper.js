@@ -208,7 +208,7 @@ async function main() {
         [ethers.getAddress(WETH), ethers.getAddress(USDC)],
         wallet.address,
         deadline,
-        { value: profitWei, gasLimit: 150000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
+        { value: profitWei, gasLimit: 300000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPrio }
       );
       await usdcTx.wait(1);
       console.log(`✅ Profit Secured into USDC Vault!\n`);

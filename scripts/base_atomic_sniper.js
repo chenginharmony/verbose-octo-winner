@@ -57,7 +57,11 @@ const ERC20_ABI = [
   'function approve(address,uint256) returns (bool)',
 ];
 
-const FIXED_ENTRY_ETH = ethers.parseEther('0.00006'); // $0.1130 USD fixed entry
+const SIZING_TIERS = {
+  PRIME: ethers.parseEther('0.001'),   // ~$1.88 (High Conviction)
+  STANDARD: ethers.parseEther('0.0002'), // ~$0.37 (Normal)
+  DEGEN: ethers.parseEther('0.00006'), // ~$0.11 (High Risk / Sandbox)
+};
 const GAS_RESERVE_ETH = ethers.parseEther('0.000005');
 
 function toUSD(ethAmount) {
@@ -217,7 +221,7 @@ async function main() {
   console.log(`   📍 Address:             ${wallet.address}`);
   console.log(`   💰 Active Trading ETH:  ${ethers.formatEther(initialBalance)} ETH (~$${toUSD(initialBalance)} USD)`);
   console.log(`   🏦 Realized USDC Vault: $${(Number(initUsdcBal) / 1e6).toFixed(4)} USDC`);
-  console.log(`   ⚡ Strict Entry Size:   ${ethers.formatEther(FIXED_ENTRY_ETH)} ETH (~$${toUSD(FIXED_ENTRY_ETH)} USD - Fixed)`);
+  console.log(`   ⚡ Dynamic Sizing:      DEGEN (~$0.11) | STANDARD (~$0.37) | PRIME (~$1.88)`);
   console.log(`   🔒 Anti-Rug Window:     0.05 to 300.0 WETH Liquidity Sweet Spot`);
   console.log(`   🛡️ Honeypot Shield:     2-Way Pre-Flight Static Simulation (>=70% Return)`);
   console.log('────────────────────────────────────────────────────────────────────────────\n');
@@ -238,9 +242,9 @@ async function main() {
             symbol: 'RECOVERED',
             entryBlock: 0,
             entryTimestamp: Date.now(),
-            entryEth: FIXED_ENTRY_ETH, // Placeholders for exit monitor math
+            entryEth: SIZING_TIERS.DEGEN, // Placeholders for exit monitor math
             tokenBalance: bal,
-            highestObservedEth: FIXED_ENTRY_ETH,
+            highestObservedEth: SIZING_TIERS.DEGEN,
             status: 'OPEN'
           });
           console.log(`♻️ Orphan Token Recovered from history: ${tokenAddr}`);
@@ -537,9 +541,9 @@ async function main() {
           symbol: meta.symbol,
           entryBlock: 0,
           entryTimestamp: Date.now(),
-          entryEth: FIXED_ENTRY_ETH,
+          entryEth: SIZING_TIERS.DEGEN,
           tokenBalance: existingBal,
-          highestObservedEth: FIXED_ENTRY_ETH,
+          highestObservedEth: SIZING_TIERS.DEGEN,
           status: 'OPEN'
         });
         savePersistedPositions(activePositions);
@@ -563,20 +567,75 @@ async function main() {
         return;
       }
 
-      // 2. Strict Entry Capital Check (Must have full $0.11 entry capital + gas reserve)
-      const ethBal = await provider.getBalance(wallet.address);
-      if (ethBal < (FIXED_ENTRY_ETH + GAS_RESERVE_ETH)) {
-        rejectCandidate(otherTokenLower, 'capital');
-        return; // DO NOT ENTER WITH DUST!
-      }
-
-      const entryEth = FIXED_ENTRY_ETH;
       const wethAddr = ethers.getAddress(WETH);
       const tokenAddr = ethers.getAddress(otherTokenLower);
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
 
-      // 🛡️ 2-WAY PRE-FLIGHT SIMULATION SHIELD:
-      // Step 1: Simulate BUY Leg
+      // 2. Fetch API Data & Score Candidate (Honeypot Shield)
+      let apiData = null;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 800);
+        const apiRes = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${tokenAddr}&chainID=8453`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!apiRes.ok) throw new Error('API failed');
+        apiData = await apiRes.json();
+        
+        if (apiData?.honeypotResult?.isHoneypot === true || !apiData?.simulationSuccess) {
+          rejectCandidate(otherTokenLower, 'sellSim');
+          return;
+        }
+      } catch {
+        rejectCandidate(otherTokenLower, 'sellSim');
+        return; // API timeout/error fails closed
+      }
+
+      // Scoring Engine
+      let tokenScore = 50; // base score
+      
+      // Tax penalties
+      const buyTax = apiData.simulationResult?.buyTax || 0;
+      const sellTax = apiData.simulationResult?.sellTax || 0;
+      if (buyTax === 0 && sellTax === 0) tokenScore += 20;
+      else if (buyTax > 5 || sellTax > 5) tokenScore -= 30;
+
+      // Holder momentum
+      const holders = parseInt(apiData.holderAnalysis?.holders || "0");
+      if (holders > 20) tokenScore += 20;
+      else if (holders > 5) tokenScore += 10;
+
+      // Verification
+      if (apiData.contractCode?.openSource) tokenScore += 20;
+      else tokenScore -= 20;
+
+      // Liquidity bonus
+      if (wethReserve > ethers.parseEther('10')) tokenScore += 15;
+      else if (wethReserve > ethers.parseEther('2')) tokenScore += 5;
+
+      tokenScore = Math.max(0, Math.min(100, tokenScore)); // clamp 0-100
+
+      let sizingTier = 'DEGEN';
+      let entryEth = SIZING_TIERS.DEGEN;
+
+      // Assign Tier
+      if (tokenScore >= 80) { sizingTier = 'PRIME'; entryEth = SIZING_TIERS.PRIME; }
+      else if (tokenScore >= 50) { sizingTier = 'STANDARD'; entryEth = SIZING_TIERS.STANDARD; }
+
+      // 3. Strict Entry Capital Check with Fallback
+      const ethBal = await provider.getBalance(wallet.address);
+      if (ethBal < (entryEth + GAS_RESERVE_ETH)) {
+        if (sizingTier === 'PRIME' && ethBal >= (SIZING_TIERS.STANDARD + GAS_RESERVE_ETH)) {
+           sizingTier = 'STANDARD'; entryEth = SIZING_TIERS.STANDARD;
+        } else if ((sizingTier === 'PRIME' || sizingTier === 'STANDARD') && ethBal >= (SIZING_TIERS.DEGEN + GAS_RESERVE_ETH)) {
+           sizingTier = 'DEGEN'; entryEth = SIZING_TIERS.DEGEN;
+        } else {
+           rejectCandidate(otherTokenLower, 'capital');
+           return;
+        }
+      }
+
+      // Step 3: Simulate BUY Leg
       try {
         await router.swapExactETHForTokensSupportingFeeOnTransferTokens.staticCall(
           1n,
@@ -588,25 +647,6 @@ async function main() {
       } catch {
         rejectCandidate(otherTokenLower, 'buySim');
         return; // Buy simulation failed
-      }
-
-      // Step 2: Simulate SELL Leg (Honeypot Shield via Third-Party API)
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 800);
-        const apiRes = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${tokenAddr}&chainID=8453`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (!apiRes.ok) throw new Error('API failed');
-        const apiData = await apiRes.json();
-        
-        if (apiData?.honeypotResult?.isHoneypot === true || !apiData?.simulationSuccess) {
-          rejectCandidate(otherTokenLower, 'sellSim');
-          return;
-        }
-      } catch {
-        rejectCandidate(otherTokenLower, 'sellSim');
-        return; // API timeout/error fails closed
       }
       telemetry.riskApproved++;
 
@@ -621,8 +661,9 @@ async function main() {
 
       console.log(`\n────────────────────────────────────────────────────────────────────────────`);
       console.log(`🚀 [SNIPE OPPORTUNITY EXECUTED] Pair: WETH / ${meta.symbol} (${source})`);
+      console.log(`   🎯 Score:          ${tokenScore}/100 (${sizingTier} TIER)`);
       console.log(`   💧 Pool Liquidity: ${ethers.formatEther(wethReserve)} WETH (~$${toUSD(wethReserve)} USD)`);
-      console.log(`   ⚡ Strict Entry:   ${ethers.formatEther(entryEth)} ETH (~$${toUSD(entryEth)} USD)`);
+      console.log(`   ⚡ Dynamic Entry:  ${ethers.formatEther(entryEth)} ETH (~$${toUSD(entryEth)} USD)`);
       console.log(`   📍 Token Address:  ${tokenAddr}`);
 
       const buyTx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(

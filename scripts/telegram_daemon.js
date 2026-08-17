@@ -109,7 +109,7 @@ function startEngine(chatId) {
 
   telegramCall('sendMessage', {
     chat_id: chatId,
-    text: `🚀 *BASE ATOMIC SNIPER LAUNCHED!* ⚡\n\n• Strategy: Genesis Sniping + Hot Momentum Scalp\n• Entry Size: $0.11 Fixed Micro-Cap\n• RPC: Base Official Developer RPC\n• Profit Vault: Auto-Sweeping to USDC`,
+    text: `🍣 *SUSHIBREAD IS SERVED!* ⚡\n\n• Strategy: Genesis Sniping + Hot Momentum Scalp\n• Entry Size: $0.11 Fixed Micro-Cap\n• RPC: Base Official Developer RPC\n• Profit Vault: Auto-Sweeping to USDC`,
     parse_mode: 'Markdown',
     reply_markup: getKeyboard()
   });

@@ -1,5 +1,5 @@
 {
-  "lastScannedBlock": 50101693,
+  "lastScannedBlock": 50101997,
   "tokens": {
     "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": {
       "SwapBased": {
@@ -423,6 +423,13 @@
         "pairAddr": "0x8FED7De8cdF149Bb8Da22c79957D019fA47a4189",
         "isWeth0": false,
         "symbol": "MOG"
+      }
+    },
+    "0xf65ad2F204D2c6e57c55a0c0588c494E427Bf0d3": {
+      "UniswapV2": {
+        "pairAddr": "0xFEA7DE92f493Cf3CBD6d408E6017f19FEeD28822",
+        "isWeth0": true,
+        "symbol": "0xf65a"
       }
     }
   }

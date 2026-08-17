@@ -37,7 +37,6 @@ if (!fs.existsSync(path.join(process.cwd(), 'state'))) {
 
 // Topics
 const PAIR_CREATED_TOPIC = ethers.id('PairCreated(address,address,address,uint256)');
-const AERO_PAIR_CREATED  = ethers.id('PairCreated(address,address,bool,address,uint256)');
 const MINT_TOPIC         = ethers.id('Mint(address,uint256,uint256)');
 const SWAP_TOPIC         = ethers.id('Swap(address,uint256,uint256,uint256,uint256,address)');
 
@@ -130,9 +129,23 @@ function saveSnipedTokens(set) {
   }
 }
 
+const BLOCKED_POSITIONS_FILE = path.join(process.cwd(), 'state', 'blocked_positions.json');
+
+function appendBlockedPosition(pos) {
+  try {
+    let data = [];
+    if (fs.existsSync(BLOCKED_POSITIONS_FILE)) data = JSON.parse(fs.readFileSync(BLOCKED_POSITIONS_FILE, 'utf8'));
+    data.push({ ...pos, blockedAt: Date.now() });
+    fs.writeFileSync(BLOCKED_POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.log('Blocked position append notice:', err.message);
+  }
+}
+
 // Global In-Memory Caches, Queues & Concurrency Locks
 const metadataCache = new Map(); // pairAddr -> { token0, token1, isWeth0, otherToken, symbol }
 const pairVelocityCache = new Map(); // pairAddr -> swapCount
+const rejectedTokensCache = new Map(); // tokenAddr -> expireTimestamp
 const highPriorityQueue = []; // Genesis Launches
 const normalPriorityQueue = []; // Momentum Swaps
 const inFlightTokens = new Set(); // Tokens currently being bought or exited
@@ -212,6 +225,30 @@ async function main() {
   const activePositions = loadPersistedPositions();
   const approvedTokens = new Set();
 
+  // Orphan Balance Recovery on Startup
+  for (const tokenAddr of lifetimeSnipedTokens) {
+    if (!activePositions.has(tokenAddr)) {
+      try {
+        const bal = await new ethers.Contract(tokenAddr, ERC20_ABI, provider).balanceOf(wallet.address);
+        if (bal > 0n) {
+          activePositions.set(tokenAddr, {
+            positionId: `${tokenAddr}_recovered_startup`,
+            tokenAddress: ethers.getAddress(tokenAddr),
+            pairAddress: '', // Unknown pair
+            symbol: 'RECOVERED',
+            entryBlock: 0,
+            entryTimestamp: Date.now(),
+            entryEth: FIXED_ENTRY_ETH, // Placeholders for exit monitor math
+            tokenBalance: bal,
+            highestObservedEth: FIXED_ENTRY_ETH,
+            status: 'OPEN'
+          });
+          console.log(`♻️ Orphan Token Recovered from history: ${tokenAddr}`);
+        }
+      } catch {}
+    }
+  }
+
   async function ensureApproval(tokenAddress, symbol) {
     const key = tokenAddress.toLowerCase();
     if (approvedTokens.has(key)) return;
@@ -257,7 +294,7 @@ async function main() {
   async function evaluateSingleExit(tokenAddr, pos) {
     const tokLower = tokenAddr.toLowerCase();
     try {
-      pos.blocksHeld = (pos.blocksHeld || 0) + 1;
+      pos.ticksHeld = (pos.ticksHeld || 0) + 1;
       const tokChk  = ethers.getAddress(tokenAddr);
       const wethChk = ethers.getAddress(WETH);
 
@@ -289,34 +326,43 @@ async function main() {
         pos.highestObservedEth = currentEthOut;
       }
 
+      const block = await provider.getBlock('latest');
+      const baseFee = block?.baseFeePerGas || 1000000n;
+      const maxPrio = 50000n;
+      const maxFee = (baseFee * 150n) / 100n + maxPrio;
+      
+      const estimatedGasWei = 300000n * maxFee; // Estimated exit gas
       const grossPnlWei = currentEthOut - pos.entryEth;
-      const gainPercent = (Number(grossPnlWei) / Number(pos.entryEth)) * 100;
+      const netPnlWei = grossPnlWei - estimatedGasWei; // True Net P&L
+
+      const netGainPercent = (Number(netPnlWei) / Number(pos.entryEth)) * 100;
       const peakGrossWei = (pos.highestObservedEth || pos.entryEth) - pos.entryEth;
-      const peakGainPercent = (Number(peakGrossWei) / Number(pos.entryEth)) * 100;
+      const peakNetWei = peakGrossWei - estimatedGasWei;
+      const peakNetGainPercent = (Number(peakNetWei) / Number(pos.entryEth)) * 100;
 
       // Print Live Monitoring Line
-      console.log(`\n📊 [ACTIVE POSITION] ${pos.symbol} | Held: ${pos.blocksHeld} blks | P&L: ${gainPercent >= 0 ? '+' : ''}${gainPercent.toFixed(1)}% (Peak: +${peakGainPercent.toFixed(1)}%) | Value: ${ethers.formatEther(currentEthOut)} ETH`);
+      console.log(`\n📊 [ACTIVE POSITION] ${pos.symbol} | Held: ${pos.ticksHeld} ticks | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% (Peak: +${peakNetGainPercent.toFixed(1)}%) | Value: ${ethers.formatEther(currentEthOut)} ETH`);
 
-      // 3. Realistic Dynamic Scalp Conditions
-      const shouldTakeProfit = gainPercent >= 5.0; // Scalp target covering gas & fees
-      const shouldTrailingLock = peakGainPercent >= 4.0 && gainPercent <= (peakGainPercent - 1.5);
-      const shouldTimeoutFlip = pos.blocksHeld >= 6 && gainPercent >= 1.0;
-      const shouldRotationExit = pos.blocksHeld >= 12; // Free up capital if stagnant
-      const shouldStopLoss = gainPercent <= -35.0 && pos.blocksHeld >= 8;
+      // 3. Realistic Dynamic Scalp Conditions (Using NET P&L)
+      const shouldTakeProfit = netGainPercent >= 5.0; // Net profit clears gas + 5%
+      const shouldTrailingLock = peakNetGainPercent >= 4.0 && netGainPercent <= (peakNetGainPercent - 1.5);
+      const shouldTimeoutFlip = pos.ticksHeld >= 6 && netGainPercent >= 1.0;
+      const shouldRotationExit = pos.ticksHeld >= 12; // Free up capital if stagnant
+      const shouldStopLoss = netGainPercent <= -35.0 && pos.ticksHeld >= 8;
 
       if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutFlip || shouldRotationExit || shouldStopLoss) {
         if (pos.isExiting) return;
         pos.isExiting = true;
 
-        const exitLabel = shouldTakeProfit ? `🎯 TAKE-PROFIT HIT (+${gainPercent.toFixed(1)}%)`
-          : shouldTrailingLock ? `🔒 TRAILING PROFIT LOCK (+${gainPercent.toFixed(1)}%)`
-          : shouldTimeoutFlip ? `⏱️ TIMEOUT PROFIT FLIP (+${gainPercent.toFixed(1)}%)`
-          : shouldRotationExit ? `🔄 ROTATION EXIT (+${gainPercent.toFixed(1)}%)`
-          : `🛑 STOP-LOSS EXIT (${gainPercent.toFixed(1)}%)`;
+        const exitLabel = shouldTakeProfit ? `🎯 TAKE-PROFIT HIT (+${netGainPercent.toFixed(1)}%)`
+          : shouldTrailingLock ? `🔒 TRAILING PROFIT LOCK (+${netGainPercent.toFixed(1)}%)`
+          : shouldTimeoutFlip ? `⏱️ TIMEOUT PROFIT FLIP (+${netGainPercent.toFixed(1)}%)`
+          : shouldRotationExit ? `🔄 ROTATION EXIT (+${netGainPercent.toFixed(1)}%)`
+          : `🛑 STOP-LOSS EXIT (${netGainPercent.toFixed(1)}%)`;
 
         console.log(`\n────────────────────────────────────────────────────────────────────────────`);
         console.log(`🚨 [BROADCASTING AUTO-EXIT] ${exitLabel} for ${pos.symbol}`);
-        console.log(`   💰 Net Expected Return: ${ethers.formatEther(currentEthOut)} ETH (~$${toUSD(currentEthOut)} USD)`);
+        console.log(`   💰 Expected Return: ${ethers.formatEther(currentEthOut)} ETH (~$${toUSD(currentEthOut)} USD)`);
 
         await ensureApproval(tokChk, pos.symbol);
 
@@ -344,6 +390,7 @@ async function main() {
           if (pos.exitAttempts >= 2) {
             console.log(`🔒 [CIRCUIT BREAKER ACTIVATED] Max exit attempts reached for ${pos.symbol}. Marking EXIT_BLOCKED.`);
             pos.status = 'EXIT_BLOCKED';
+            appendBlockedPosition(pos);
             activePositions.delete(tokLower);
             savePersistedPositions(activePositions);
             inFlightTokens.delete(tokLower);
@@ -369,11 +416,11 @@ async function main() {
         savePersistedPositions(activePositions);
         inFlightTokens.delete(tokLower);
 
-        if (grossPnlWei > 0n) {
-          await sweepProfitToUsdc(grossPnlWei);
-          telegram.notifyTakeProfit(pos.symbol, gainPercent.toFixed(1), ethers.formatEther(currentEthOut), (Number(grossPnlWei)*ETH_USD/1e18).toFixed(4), tx.hash);
+        if (netPnlWei > 0n) {
+          await sweepProfitToUsdc(netPnlWei);
+          telegram.notifyTakeProfit(pos.symbol, netGainPercent.toFixed(1), ethers.formatEther(currentEthOut), (Number(netPnlWei)*ETH_USD/1e18).toFixed(4), tx.hash);
         } else {
-          telegram.notifyStopLoss(pos.symbol, gainPercent.toFixed(1), ethers.formatEther(currentEthOut), tx.hash);
+          telegram.notifyStopLoss(pos.symbol, netGainPercent.toFixed(1), ethers.formatEther(currentEthOut), tx.hash);
         }
       }
     } catch (err) {
@@ -384,17 +431,14 @@ async function main() {
 
   // Autonomous Dedicated 1.5s Exit Monitor (Runs Concurrently Across All Open Positions)
   setInterval(async () => {
-    if (activePositions.size === 0 || isExitEvaluating) return;
-    isExitEvaluating = true;
+    if (activePositions.size === 0) return;
     try {
       const exitPromises = [];
       for (const [tokenAddr, pos] of activePositions.entries()) {
         exitPromises.push(evaluateSingleExit(tokenAddr, pos));
       }
       await Promise.allSettled(exitPromises);
-    } catch {} finally {
-      isExitEvaluating = false;
-    }
+    } catch {}
   }, 1500);
 
   // =========================================================================
@@ -406,7 +450,6 @@ async function main() {
     '0x50c5725949a6f0c72e6c4a641f24049a917db0cb', // DAI
     '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca', // USDbC
     '0x2ae3f1ec7e1f5be1a0c73f73eedfdd7c030f4742', // cbETH
-    '0x940181a94a35a4569e4529a3cdfb74e38fd98631', // AERO
   ]);
 
   async function getOrFetchMetadata(pairAddress, t0, t1) {
@@ -453,15 +496,32 @@ async function main() {
       otherTokenLower = meta.otherToken.toLowerCase();
       if (EXCLUDED_TOKENS.has(otherTokenLower)) return;
 
+      // 🛡️ LOCK CHECK 0: Rejected Cooldown
+      if (rejectedTokensCache.has(otherTokenLower)) {
+        if (Date.now() < rejectedTokensCache.get(otherTokenLower)) return; // Skip silently
+        rejectedTokensCache.delete(otherTokenLower); // Expired
+      }
+
+      function rejectCandidate(token, reason) {
+        if (reason === 'duplicate') telemetry.rejectedDuplicate++;
+        else if (reason === 'liquidity') telemetry.rejectedLiquidity++;
+        else if (reason === 'capital') telemetry.rejectedCapital++;
+        else if (reason === 'buySim') telemetry.rejectedBuySim++;
+        else if (reason === 'sellSim') telemetry.rejectedSellSim++;
+        
+        // Cooldown for 60 seconds to protect RPC
+        rejectedTokensCache.set(token, Date.now() + 60000);
+      }
+
       // 🛡️ LOCK CHECK 1: Lifetime Snipe Deduplication (Has this token EVER been bought before?)
       if (lifetimeSnipedTokens.has(otherTokenLower)) {
-        telemetry.rejectedDuplicate++;
+        rejectCandidate(otherTokenLower, 'duplicate');
         return;
       }
 
       // 🛡️ LOCK CHECK 2: In-Flight or Active Position Check
       if (inFlightTokens.has(otherTokenLower) || activePositions.has(otherTokenLower)) {
-        telemetry.rejectedDuplicate++;
+        rejectCandidate(otherTokenLower, 'duplicate');
         return;
       }
 
@@ -499,14 +559,14 @@ async function main() {
 
       const wethReserve = meta.isWeth0 ? r0 : r1;
       if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) {
-        telemetry.rejectedLiquidity++;
+        rejectCandidate(otherTokenLower, 'liquidity');
         return;
       }
 
       // 2. Strict Entry Capital Check (Must have full $0.11 entry capital + gas reserve)
       const ethBal = await provider.getBalance(wallet.address);
       if (ethBal < (FIXED_ENTRY_ETH + GAS_RESERVE_ETH)) {
-        telemetry.rejectedCapital++;
+        rejectCandidate(otherTokenLower, 'capital');
         return; // DO NOT ENTER WITH DUST!
       }
 
@@ -526,25 +586,27 @@ async function main() {
           { value: entryEth, from: wallet.address }
         );
       } catch {
-        telemetry.rejectedBuySim++;
+        rejectCandidate(otherTokenLower, 'buySim');
         return; // Buy simulation failed
       }
 
-      // Step 2: Simulate SELL Leg & Verify Minimum 70% Return
+      // Step 2: Simulate SELL Leg (Honeypot Shield via Third-Party API)
       try {
-        const estTokens = (await router.getAmountsOut(entryEth, [wethAddr, tokenAddr]))[1];
-        if (estTokens === 0n) {
-          telemetry.rejectedSellSim++;
-          return;
-        }
-        const estEthBack = (await router.getAmountsOut(estTokens, [tokenAddr, wethAddr]))[1];
-        if (estEthBack < (entryEth * 70n) / 100n) {
-          telemetry.rejectedSellSim++;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 800);
+        const apiRes = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${tokenAddr}&chainID=8453`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!apiRes.ok) throw new Error('API failed');
+        const apiData = await apiRes.json();
+        
+        if (apiData?.honeypotResult?.isHoneypot === true || !apiData?.simulationSuccess) {
+          rejectCandidate(otherTokenLower, 'sellSim');
           return;
         }
       } catch {
-        telemetry.rejectedSellSim++;
-        return; // Sell simulation failed (Honeypot)
+        rejectCandidate(otherTokenLower, 'sellSim');
+        return; // API timeout/error fails closed
       }
       telemetry.riskApproved++;
 
@@ -678,10 +740,9 @@ async function main() {
       blockCycleCounter += (to - from + 1);
 
       // Parallel event ingestion
-      const [mintLogs, pairLogs, aeroLogs, swapLogs] = await Promise.all([
+      const [mintLogs, pairLogs, swapLogs] = await Promise.all([
         provider.getLogs({ fromBlock: from, toBlock: to, topics: [MINT_TOPIC] }).catch(() => []),
         provider.getLogs({ fromBlock: from, toBlock: to, topics: [PAIR_CREATED_TOPIC] }).catch(() => []),
-        provider.getLogs({ fromBlock: from, toBlock: to, topics: [AERO_PAIR_CREATED] }).catch(() => []),
         provider.getLogs({ fromBlock: from, toBlock: to, topics: [SWAP_TOPIC] }).catch(() => []),
       ]);
 
@@ -692,15 +753,6 @@ async function main() {
         const token1 = '0x' + log.topics[2].slice(26);
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data);
         highPriorityQueue.push({ priority: 1, pairAddress: decoded[0], token0, token1, source: 'Genesis UniswapV2' });
-        telemetry.genesisQueued++;
-      }
-
-      for (const log of aeroLogs) {
-        telemetry.pairCreatedDetected++;
-        const token0 = '0x' + log.topics[1].slice(26);
-        const token1 = '0x' + log.topics[2].slice(26);
-        const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['address', 'uint256'], log.data);
-        highPriorityQueue.push({ priority: 1, pairAddress: decoded[0], token0, token1, source: 'Genesis Aerodrome' });
         telemetry.genesisQueued++;
       }
 
@@ -717,7 +769,7 @@ async function main() {
         const count = (pairVelocityCache.get(pAddr) || 0) + 1;
         pairVelocityCache.set(pAddr, count);
 
-        if (count >= 1) {
+        if (count >= 3) {
           normalPriorityQueue.push({ priority: 2, pairAddress: sLog.address, source: 'Momentum Burst' });
           telemetry.momentumQueued++;
         }

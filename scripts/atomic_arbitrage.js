@@ -82,12 +82,15 @@ async function getGasEstimateEth() {
   }
 }
 
-// Uniswap V2 Constant Product Formula (0.3% fee)
-function getAmountOut(amountIn, reserveIn, reserveOut) {
+// Accurate DEX Fee Aware Constant Product Formula
+function getAmountOut(amountIn, reserveIn, reserveOut, dexName = 'UniswapV2') {
   if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return 0n;
-  const amountInWithFee = amountIn * 997n;
+  // Aerodrome volatile pools have 100 bps (1.00%) fee; standard V2 (Uniswap, Sushi, BaseSwap, AlienBase) is 30 bps (0.30%)
+  const feeBps = (dexName === 'Aerodrome') ? 100n : 30n;
+  const multiplier = 10000n - feeBps;
+  const amountInWithFee = amountIn * multiplier;
   const numerator = amountInWithFee * reserveOut;
-  const denominator = (reserveIn * 1000n) + amountInWithFee;
+  const denominator = (reserveIn * 10000n) + amountInWithFee;
   return numerator / denominator;
 }
 
@@ -237,8 +240,8 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
         }
 
         let bestInput = TEST_VOLUMES[0];
-        const initialOutToken = getAmountOut(TEST_VOLUMES[0], buyReserves.rWeth, buyReserves.rToken);
-        const initialOutWeth = getAmountOut(initialOutToken, sellReserves.rToken, sellReserves.rWeth);
+        const initialOutToken = getAmountOut(TEST_VOLUMES[0], buyReserves.rWeth, buyReserves.rToken, buyDex);
+        const initialOutWeth = getAmountOut(initialOutToken, sellReserves.rToken, sellReserves.rWeth, sellDex);
         let bestGrossProfit = initialOutWeth - TEST_VOLUMES[0];
         let bestNetProfit = bestGrossProfit - gasCostEth;
         let bestOutToken = initialOutToken;
@@ -246,16 +249,16 @@ function evaluateCrossedMarkets(reservesCache, gasCostEth) {
 
         // Multi-tier ladder evaluation
         for (const size of TEST_VOLUMES) {
-          const outToken = getAmountOut(size, buyReserves.rWeth, buyReserves.rToken);
-          const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
+          const outToken = getAmountOut(size, buyReserves.rWeth, buyReserves.rToken, buyDex);
+          const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth, sellDex);
           const grossProfit = outWeth - size;
           const netProfit = grossProfit - gasCostEth;
 
           if (bestInput > 0n && netProfit < bestNetProfit) {
             // Half-step binary search convergence
             const trySize = (size + bestInput) / 2n;
-            const tryOutToken = getAmountOut(trySize, buyReserves.rWeth, buyReserves.rToken);
-            const tryOutWeth = getAmountOut(tryOutToken, sellReserves.rToken, sellReserves.rWeth);
+            const tryOutToken = getAmountOut(trySize, buyReserves.rWeth, buyReserves.rToken, buyDex);
+            const tryOutWeth = getAmountOut(tryOutToken, sellReserves.rToken, sellReserves.rWeth, sellDex);
             const tryGross = tryOutWeth - trySize;
             const tryNet = tryGross - gasCostEth;
 
@@ -617,6 +620,23 @@ async function startHotLoop() {
           const [t0_1, t0_2] = await Promise.all([buyP.token0(), sellP.token0()]);
           const zeroForOne1 = t0_1.toLowerCase() === WETH.toLowerCase();
           const zeroForOne2 = t0_2.toLowerCase() !== WETH.toLowerCase();
+
+          // 1. Pre-Flight Zero-Gas StaticCall Simulation
+          try {
+            await breadContract.executeArbitrage.staticCall(
+              bestOpp.buyPair.pairAddr,
+              bestOpp.sellPair.pairAddr,
+              bestOpp.input,
+              bestOpp.outToken,
+              bestOpp.outWeth,
+              zeroForOne1,
+              zeroForOne2,
+              1n
+            );
+          } catch (simErr) {
+            console.log(`   ⚠️ Pre-Flight Simulation Rejected (Safe, 0 Gas Spent): ${simErr.message}`);
+            return;
+          }
 
           const block = await provider.getBlock('latest');
           const baseFee = block?.baseFeePerGas || 1000000n;

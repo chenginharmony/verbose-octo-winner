@@ -1,11 +1,23 @@
 {
-  "lastScannedBlock": 50096393,
+  "lastScannedBlock": 50097033,
   "tokens": {
     "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA": {
       "SwapBased": {
         "pairAddr": "0x86cd030822547105Bd7952AF4ba48534640A3824",
         "isWeth0": true,
         "symbol": "USDbC"
+      }
+    },
+    "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": {
+      "BaseSwap": {
+        "pairAddr": "0xab067c01C7F5734da168C699Ae9d23a4512c9FdB",
+        "isWeth0": true,
+        "symbol": "USDC"
+      },
+      "SwapBased": {
+        "pairAddr": "0xaEeB835f3Aa21d19ea5E33772DaA9E64f1b6982F",
+        "isWeth0": true,
+        "symbol": "USDC"
       }
     }
   }

@@ -10,6 +10,13 @@ const provider = new ethers.JsonRpcProvider(RPC, 8453);
 
 const WETH = '0x4200000000000000000000000000000000000006';
 
+// Canonical Multicall3 on Base
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const MULTICALL3_ABI = [
+  'function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) view returns (tuple(bool success, bytes returnData)[] returnData)'
+];
+const multicallContract = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
+
 // Verified Standard V2 DEX Factories on Base
 const FACTORIES = {
   BaseSwap: '0xFDa619b6d20975be80A10332cD39b9a4b0FAa8BB',
@@ -19,7 +26,7 @@ const FACTORIES = {
 
 const REGISTRY_FILE = path.join(process.cwd(), 'data', 'pools_registry.json');
 
-// Global state machine for execution
+// Global state machine
 let engineState = 'IDLE'; // 'IDLE' | 'EXECUTING'
 
 const BREAD_ROUTER = process.env.BREAD_ROUTER_ADDRESS;
@@ -40,7 +47,7 @@ const PAIR_ABI = [
   'function token0() view returns (address)',
   'function token1() view returns (address)'
 ];
-
+const pairInterface = new ethers.Interface(PAIR_ABI);
 const pairCreatedTopic = ethers.id('PairCreated(address,address,address,uint256)');
 
 // Global pool registry: tokenAddr -> { dexName: { pairAddr, isWeth0, symbol } }
@@ -48,7 +55,17 @@ const discoveredPairs = {};
 const activeArbitragePairs = []; // Array of { tokenAddr, dex, pairAddr, isWeth0, symbol }
 let lastScannedBlock = 0;
 
-// Dynamic Gas Estimate for Bread.sol (approx 180k gas)
+// Flashbots-style discrete volume testing ladder
+const TEST_VOLUMES = [
+  ethers.parseEther('0.00010'), // ~$0.19
+  ethers.parseEther('0.00025'), // ~$0.47
+  ethers.parseEther('0.00050'), // ~$0.94
+  ethers.parseEther('0.00100'), // ~$1.88
+  ethers.parseEther('0.00200'), // ~$3.76
+  ethers.parseEther('0.00500')  // ~$9.41
+];
+
+// Dynamic Gas Estimation
 async function getGasEstimateEth() {
   try {
     const block = await provider.getBlock('latest');
@@ -56,13 +73,14 @@ async function getGasEstimateEth() {
     const gasLimit = 180000n;
     return baseFee * gasLimit;
   } catch (e) {
-    return 180000n * 2000000n; // fallback ~0.00036 ETH
+    return 180000n * 2000000n;
   }
 }
 
+// Uniswap V2 Constant Product Formula (0.3% fee)
 function getAmountOut(amountIn, reserveIn, reserveOut) {
   if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return 0n;
-  const amountInWithFee = amountIn * 997n; // 0.3% Uniswap V2 fee
+  const amountInWithFee = amountIn * 997n;
   const numerator = amountInWithFee * reserveOut;
   const denominator = (reserveIn * 1000n) + amountInWithFee;
   return numerator / denominator;
@@ -81,9 +99,7 @@ function saveRegistry() {
       lastScannedBlock,
       tokens: discoveredPairs
     }, null, 2));
-  } catch (err) {
-    // Non-fatal disk write error
-  }
+  } catch (err) {}
 }
 
 // Load registry from disk
@@ -103,7 +119,7 @@ function loadRegistry() {
   }
 }
 
-// Rebuild the hot execution list: only tokens that exist on >= 2 DEXs
+// Rebuild active list: only tokens that exist on >= 2 DEXs
 function updateIntersectionMatrix() {
   activeArbitragePairs.length = 0;
   for (const [tokenAddr, dexMap] of Object.entries(discoveredPairs)) {
@@ -122,12 +138,147 @@ function updateIntersectionMatrix() {
   }
 }
 
-// Query factory logs in safe chunks
+// 1-Call Multicall3 Reserve Batch Reader
+async function updateAllReservesMulticall() {
+  if (activeArbitragePairs.length === 0) return {};
+  
+  const callData = pairInterface.encodeFunctionData('getReserves');
+  const calls = activeArbitragePairs.map(p => ({
+    target: p.pairAddr,
+    allowFailure: true,
+    callData
+  }));
+
+  const reservesCache = {}; // `${dex}_${tokenAddr}` -> { rWeth, rToken }
+
+  try {
+    const results = await multicallContract.aggregate3(calls);
+    for (let i = 0; i < activeArbitragePairs.length; i++) {
+      const p = activeArbitragePairs[i];
+      const res = results[i];
+      if (res && res.success && res.returnData !== '0x') {
+        const decoded = pairInterface.decodeFunctionResult('getReserves', res.returnData);
+        const r0 = decoded[0];
+        const r1 = decoded[1];
+        const rWeth = p.isWeth0 ? r0 : r1;
+        const rToken = p.isWeth0 ? r1 : r0;
+        reservesCache[`${p.dex}_${p.tokenAddr}`] = { rWeth, rToken };
+      }
+    }
+  } catch (err) {
+    // Transient Multicall failure
+  }
+
+  return reservesCache;
+}
+
+// Flashbots-style Market Evaluator with Binary Step Optimization
+function evaluateCrossedMarkets(reservesCache, gasCostEth) {
+  let bestOpportunity = null;
+  const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
+
+  for (const tokenAddr of uniqueTokens) {
+    const tokenPairs = activeArbitragePairs.filter(p => p.tokenAddr === tokenAddr);
+    const dexes = tokenPairs.map(p => p.dex);
+
+    for (let i = 0; i < dexes.length; i++) {
+      for (let j = i + 1; j < dexes.length; j++) {
+        const d1 = dexes[i];
+        const d2 = dexes[j];
+
+        const r1 = reservesCache[`${d1}_${tokenAddr}`];
+        const r2 = reservesCache[`${d2}_${tokenAddr}`];
+
+        if (!r1 || !r2) continue;
+        if (r1.rWeth < ethers.parseEther('0.05') || r2.rWeth < ethers.parseEther('0.05')) continue;
+
+        // Fast probe check
+        const price1 = Number(ethers.formatEther(r1.rWeth)) / Number(ethers.formatEther(r1.rToken));
+        const price2 = Number(ethers.formatEther(r2.rWeth)) / Number(ethers.formatEther(r2.rToken));
+
+        let buyDex = null;
+        let sellDex = null;
+        let buyReserves = null;
+        let sellReserves = null;
+        let spread = 0;
+
+        if (price1 > price2) {
+          spread = ((price1 - price2) / price2) * 100;
+          buyDex = d2; sellDex = d1;
+          buyReserves = r2; sellReserves = r1;
+        } else {
+          spread = ((price2 - price1) / price1) * 100;
+          buyDex = d1; sellDex = d2;
+          buyReserves = r1; sellReserves = r2;
+        }
+
+        // Only evaluate if spread exceeds DEX fees + minimum threshold (0.6% total fees)
+        if (spread > 0.4) {
+          let bestInput = 0n;
+          let bestNetProfit = -1000000000000n;
+          let bestOutToken = 0n;
+          let bestOutWeth = 0n;
+
+          // Multi-tier ladder evaluation
+          for (const size of TEST_VOLUMES) {
+            const outToken = getAmountOut(size, buyReserves.rWeth, buyReserves.rToken);
+            const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
+            const grossProfit = outWeth - size;
+            const netProfit = grossProfit - gasCostEth;
+
+            if (bestInput > 0n && netProfit < bestNetProfit) {
+              // Half-step binary search convergence (Flashbots pattern)
+              const trySize = (size + bestInput) / 2n;
+              const tryOutToken = getAmountOut(trySize, buyReserves.rWeth, buyReserves.rToken);
+              const tryOutWeth = getAmountOut(tryOutToken, sellReserves.rToken, sellReserves.rWeth);
+              const tryNet = (tryOutWeth - trySize) - gasCostEth;
+
+              if (tryNet > bestNetProfit) {
+                bestNetProfit = tryNet;
+                bestInput = trySize;
+                bestOutToken = tryOutToken;
+                bestOutWeth = tryOutWeth;
+              }
+              break;
+            }
+
+            if (netProfit > bestNetProfit) {
+              bestNetProfit = netProfit;
+              bestInput = size;
+              bestOutToken = outToken;
+              bestOutWeth = outWeth;
+            }
+          }
+
+          if (bestNetProfit > 0n && (!bestOpportunity || bestNetProfit > bestOpportunity.netProfit)) {
+            bestOpportunity = {
+              symbol: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr).symbol,
+              tokenAddr,
+              buyDex,
+              sellDex,
+              buyPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
+              sellPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
+              spread,
+              input: bestInput,
+              outToken: bestOutToken,
+              outWeth: bestOutWeth,
+              gasCost: gasCostEth,
+              netProfit: bestNetProfit
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return bestOpportunity;
+}
+
+// Background Factory Log Scanner
 async function scanFactoryLogs(factoryName, factoryAddr, fromBlock, toBlock) {
   const CHUNK_SIZE = 9999;
   let totalEvents = 0;
   let wethPairsFound = 0;
-  let nonWethPairsFiltered = 0;
 
   for (let from = fromBlock; from <= toBlock; from += CHUNK_SIZE) {
     const to = Math.min(from + CHUNK_SIZE - 1, toBlock);
@@ -155,8 +306,6 @@ async function scanFactoryLogs(factoryName, factoryAddr, fromBlock, toBlock) {
         } else if (t1.toLowerCase() === WETH.toLowerCase()) {
           targetToken = t0;
           isWeth0 = false;
-        } else {
-          nonWethPairsFiltered++;
         }
 
         if (targetToken) {
@@ -171,28 +320,24 @@ async function scanFactoryLogs(factoryName, factoryAddr, fromBlock, toBlock) {
           }
         }
       }
-    } catch (err) {
-      // Skip chunk if RPC fails
-    }
-    await new Promise(r => setTimeout(r, 60)); // Gentle RPC delay
+    } catch (err) {}
+    await new Promise(r => setTimeout(r, 60));
   }
 
-  // Diagnostic Reporting
   if (wethPairsFound === 0) {
-    console.log(`[DISCOVERY_DIAGNOSTIC] ${factoryName} (${factoryAddr}): 0 WETH pairs found in range #${fromBlock}-#${toBlock}. Total PairCreated: ${totalEvents}, Non-WETH Filtered: ${nonWethPairsFiltered}.`);
+    console.log(`[DISCOVERY_DIAGNOSTIC] ${factoryName}: 0 WETH pairs in range #${fromBlock}-#${toBlock} (${totalEvents} events).`);
   } else {
-    console.log(`[DISCOVERY] ${factoryName}: ${wethPairsFound} WETH pairs found (${totalEvents} total events).`);
+    console.log(`[DISCOVERY] ${factoryName}: ${wethPairsFound} WETH pairs found.`);
   }
 }
 
-// Initial discovery + on-chain seed
+// Initial discovery + core bluechip pair discovery
 async function initialDiscovery() {
   loadRegistry();
 
   const currentBlock = await provider.getBlockNumber();
   console.log(`\n🔄 Initializing Dynamic Pool Discovery (Chain Head: #${currentBlock})...`);
 
-  // If no previous scan, look back 300,000 blocks (~7 days)
   const startBlock = lastScannedBlock > 0 ? lastScannedBlock + 1 : Math.max(0, currentBlock - 300000);
 
   for (const [dex, factoryAddr] of Object.entries(FACTORIES)) {
@@ -200,7 +345,7 @@ async function initialDiscovery() {
     await scanFactoryLogs(dex, factoryAddr, startBlock, currentBlock);
   }
 
-  // Seed core bluechip pairs directly if not yet populated (USDC, USDbC, DAI, cbETH)
+  // Seed core bluechip pairs
   const CORE_TOKENS = [
     { symbol: 'USDC', addr: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
     { symbol: 'USDbC', addr: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA' },
@@ -240,7 +385,7 @@ async function initialDiscovery() {
   console.log(`   Active Matrix: ${Object.keys(FACTORIES).join(' ↔️ ')}\n`);
 }
 
-// Background Discovery Loop: Runs every 45s to fetch new blocks
+// Background Discovery Poller (every 45s)
 function startBackgroundDiscovery() {
   console.log('📡 Background Discovery Poller Active (interval: 45s)...');
   setInterval(async () => {
@@ -256,16 +401,14 @@ function startBackgroundDiscovery() {
       lastScannedBlock = currentBlock;
       updateIntersectionMatrix();
       saveRegistry();
-    } catch (err) {
-      // Non-fatal background error
-    }
+    } catch (err) {}
   }, 45000);
 }
 
-// Hot Arbitrage Execution Loop: Runs rapidly every block
+// Flashbots-Accelerated Hot Arb Loop (via Multicall3)
 async function startHotLoop() {
   let lastProcessedBlock = 0;
-  console.log('⚡ [HOT ARB LOOP] Online. Watching Base blocks...\n');
+  console.log('⚡ [HOT ARB LOOP] Online (Multicall3 Accelerated). Watching Base blocks...\n');
 
   setInterval(async () => {
     try {
@@ -284,112 +427,19 @@ async function startHotLoop() {
       if (activeArbitragePairs.length === 0) {
         process.stdout.write('.');
         if (currentBlock % 5 === 0) {
-          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).length} DEXs | 0 Cross-DEX Candidates`);
+          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).length} DEXs | 0 Candidates`);
         }
         return;
       }
 
-      // Fetch reserves sequentially to respect RPC limits
-      const reservesCache = {};
-      for (const p of activeArbitragePairs) {
-        try {
-          const pair = new ethers.Contract(p.pairAddr, PAIR_ABI, provider);
-          const [r0, r1] = await pair.getReserves();
-          const rWeth = p.isWeth0 ? r0 : r1;
-          const rToken = p.isWeth0 ? r1 : r0;
-          reservesCache[`${p.dex}_${p.tokenAddr}`] = { rWeth, rToken };
-        } catch (e) {}
-      }
+      // 1. Single-Call Multicall3 Batch Reserve Update
+      const [reservesCache, gasCostEth] = await Promise.all([
+        updateAllReservesMulticall(),
+        getGasEstimateEth()
+      ]);
 
-      const gasCostEth = await getGasEstimateEth();
-      let bestOpp = null;
-
-      const uniqueTokens = [...new Set(activeArbitragePairs.map(p => p.tokenAddr))];
-
-      for (const tokenAddr of uniqueTokens) {
-        const tokenPairs = activeArbitragePairs.filter(p => p.tokenAddr === tokenAddr);
-        const dexes = tokenPairs.map(p => p.dex);
-
-        for (let i = 0; i < dexes.length; i++) {
-          for (let j = i + 1; j < dexes.length; j++) {
-            const d1 = dexes[i];
-            const d2 = dexes[j];
-
-            const r1 = reservesCache[`${d1}_${tokenAddr}`];
-            const r2 = reservesCache[`${d2}_${tokenAddr}`];
-
-            if (!r1 || !r2) continue;
-            // Ignore pools with trivial liquidity (< 0.05 WETH)
-            if (r1.rWeth < ethers.parseEther('0.05') || r2.rWeth < ethers.parseEther('0.05')) continue;
-
-            const price1 = Number(ethers.formatEther(r1.rWeth)) / Number(ethers.formatEther(r1.rToken));
-            const price2 = Number(ethers.formatEther(r2.rWeth)) / Number(ethers.formatEther(r2.rToken));
-
-            let spread = 0;
-            let buyDex = null;
-            let sellDex = null;
-            let buyReserves = null;
-            let sellReserves = null;
-
-            if (price1 > price2) {
-              spread = ((price1 - price2) / price2) * 100;
-              buyDex = d2; sellDex = d1;
-              buyReserves = r2; sellReserves = r1;
-            } else {
-              spread = ((price2 - price1) / price1) * 100;
-              buyDex = d1; sellDex = d2;
-              buyReserves = r1; sellReserves = r2;
-            }
-
-            if (spread > 0.4) {
-              // Test small sizes adapted for bankroll
-              const testInputs = [
-                ethers.parseEther('0.00010'), // ~$0.19
-                ethers.parseEther('0.00025'), // ~$0.47
-                ethers.parseEther('0.00050'), // ~$0.94
-                ethers.parseEther('0.00100')  // ~$1.88
-              ];
-
-              let bestInput = 0n;
-              let bestNetProfit = -1000000000000n;
-              let bestOutToken = 0n;
-              let bestOutWeth = 0n;
-
-              for (const input of testInputs) {
-                const outToken = getAmountOut(input, buyReserves.rWeth, buyReserves.rToken);
-                const outWeth = getAmountOut(outToken, sellReserves.rToken, sellReserves.rWeth);
-
-                const grossProfit = outWeth - input;
-                const netProfit = grossProfit - gasCostEth;
-
-                if (netProfit > bestNetProfit) {
-                  bestNetProfit = netProfit;
-                  bestInput = input;
-                  bestOutToken = outToken;
-                  bestOutWeth = outWeth;
-                }
-              }
-
-              if (bestNetProfit > 0n && (!bestOpp || bestNetProfit > bestOpp.netProfit)) {
-                bestOpp = {
-                  symbol: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr).symbol,
-                  tokenAddr,
-                  buyDex,
-                  sellDex,
-                  buyPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === buyDex),
-                  sellPair: activeArbitragePairs.find(p => p.tokenAddr === tokenAddr && p.dex === sellDex),
-                  spread,
-                  input: bestInput,
-                  outToken: bestOutToken,
-                  outWeth: bestOutWeth,
-                  gasCost: gasCostEth,
-                  netProfit: bestNetProfit
-                };
-              }
-            }
-          }
-        }
-      }
+      // 2. Flashbots Crossed-Market Evaluation
+      const bestOpp = evaluateCrossedMarkets(reservesCache, gasCostEth);
 
       if (bestOpp) {
         console.log(`\n─────────────────────────────────────────────────`);
@@ -447,12 +497,10 @@ async function startHotLoop() {
       } else {
         process.stdout.write('.');
         if (currentBlock % 5 === 0) {
-          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).length} DEXs | Candidate Pools: ${activeArbitragePairs.length}`);
+          console.log(`\n[ARB SCAN] Block #${currentBlock} | Active Matrix: ${Object.keys(FACTORIES).length} DEXs | Candidates: ${activeArbitragePairs.length}`);
         }
       }
-    } catch (err) {
-      // Suppress transient RPC timeouts
-    }
+    } catch (err) {}
   }, 2000);
 }
 

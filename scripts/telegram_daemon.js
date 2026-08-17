@@ -196,6 +196,11 @@ function startEngine(chatId) {
 
   startLiveRadar(chatId);
 
+  engineProcess.stdout.on('data', (data) => {
+    const output = data.toString();
+    process.stdout.write(output);
+    addLog(output);
+
     if (output.includes('⏳ Block #')) {
       const match = output.match(/Block #(\d+) \| Ingest: (\d+)ms \| Latency: (\d+)ms \| 🔄 Swaps: (\d+) \(([0-9.]+)\/s\) \| Queue: (\d+)/);
       if (match) {

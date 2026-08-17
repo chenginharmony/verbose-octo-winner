@@ -5,8 +5,8 @@ import path from 'path';
 
 dotenv.config();
 
-const RPC = process.env.BASE_RPC_URL || 'https://developer-access-mainnet.base.org';
-const provider = new ethers.JsonRpcProvider(RPC, 8453);
+const RPC = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+const provider = new ethers.JsonRpcProvider(RPC, { chainId: 8453, name: 'base' }, { staticNetwork: true });
 
 const WETH = '0x4200000000000000000000000000000000000006';
 

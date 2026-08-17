@@ -723,28 +723,11 @@ async function startHotLoop() {
           const zeroForOne1 = t0_1.toLowerCase() === WETH.toLowerCase();
           const zeroForOne2 = t0_2.toLowerCase() !== WETH.toLowerCase();
 
-          // 1. Pre-Flight Zero-Gas StaticCall Simulation
-          try {
-            await breadContract.executeArbitrage.staticCall(
-              bestOpp.buyPair.pairAddr,
-              bestOpp.sellPair.pairAddr,
-              bestOpp.input,
-              bestOpp.outToken,
-              bestOpp.outWeth,
-              zeroForOne1,
-              zeroForOne2,
-              1n
-            );
-            console.log(`   ✅ Pre-Flight Simulation Passed! Executing on-chain...`);
-          } catch (simErr) {
-            console.log(`   ⚠️ Pre-Flight Simulation Rejected (Safe, 0 Gas Spent): ${simErr.message}`);
-            return;
-          }
-
           const block = await provider.getBlock('latest');
           const baseFee = block?.baseFeePerGas || 1000000n;
           const maxFee = (baseFee * 150n) / 100n + 50000n;
 
+          console.log(`   🚀 Dispatching on-chain transaction to Base...`);
           const tx = await breadContract.executeArbitrage(
             bestOpp.buyPair.pairAddr,
             bestOpp.sellPair.pairAddr,
@@ -753,11 +736,11 @@ async function startHotLoop() {
             bestOpp.outWeth,
             zeroForOne1,
             zeroForOne2,
-            1n, // Accept positive profit
+            1n, // Guaranteed positive profit required on-chain
             { gasLimit: 250000n, maxFeePerGas: maxFee, maxPriorityFeePerGas: 50000n }
           );
 
-          console.log(`   Tx Submitted: ${tx.hash}`);
+          console.log(`   📡 Tx Sent: https://basescan.org/tx/${tx.hash}`);
           const receipt = await tx.wait(1);
           console.log(`   ✅ Arbitrage Mined on Base in Block #${receipt.blockNumber}!`);
           console.log(`[ARB MINED] Block #${receipt.blockNumber} | Token: ${bestOpp.symbol} | Profit: +$${toUsd(bestOpp.netProfit)} | Tx: ${tx.hash}`);

@@ -1,0 +1,234 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 1. Observed Chain Events
+model ChainEvent {
+  id               String   @id @default(uuid())
+  chainId          Int
+  blockNumber      BigInt
+  transactionHash  String
+  logIndex         Int?
+  sender           String?
+  recipient        String?
+  value            String?
+  inputData        String?
+  gasLimit         BigInt?
+  maxFeePerGas     BigInt?
+  observedAt       DateTime @default(now())
+  observationStage String
+  status           String
+  createdAt        DateTime @default(now())
+
+  swaps DecodedSwap[]
+  @@index([chainId, blockNumber])
+  @@index([transactionHash])
+}
+
+// 2. Decoded Swaps
+model DecodedSwap {
+  id              String   @id @default(uuid())
+  chainEventId    String?
+  poolAddress     String
+  protocol        String
+  transactionHash String
+  blockNumber     BigInt
+  logIndex        Int
+  sender          String
+  recipient       String
+  amount0In       String
+  amount1In       String
+  amount0Out      String
+  amount1Out      String
+  zeroForOne      Boolean
+  amountIn        String
+  amountOut       String
+  tokenIn         String
+  tokenOut        String
+  observedAt      DateTime @default(now())
+
+  chainEvent    ChainEvent?   @relation(fields: [chainEventId], references: [id])
+  opportunities Opportunity[]
+  @@index([poolAddress])
+  @@index([transactionHash])
+}
+
+// 3. Monitored DEX Pools
+model Pool {
+  id             String   @id @default(uuid())
+  chainId        Int
+  name           String
+  address        String   @unique
+  factoryAddress String
+  protocol       String
+  token0Symbol   String
+  token0Address  String
+  token1Symbol   String
+  token1Address  String
+  feeNumerator   BigInt
+  feeDenominator BigInt
+  stable         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  opportunities Opportunity[]
+}
+
+// 4. MEV Strategy Opportunities
+model Opportunity {
+  id                      String   @id @default(uuid())
+  swapId                  String?
+  poolAddress             String
+  strategy                String   @default("SANDWICH") // Primary: SANDWICH
+  chainId                 Int
+  blockNumber             BigInt
+  flashblockId            String?
+  direction               String
+  victimAmountUsd         Float
+  recommendedFrontRunUsd  Float
+  grossProfitUsd          Float
+  estimatedGasCostUsd     Float
+  estimatedL1DataFeeUsd   Float
+  estimatedNetProfitUsd   Float
+  executionProbability    Float
+  survivalProbability     Float
+  expectedValueUsd        Float
+  status                  String   @default("DETECTED")
+  rejectionReason         String?
+  detectedAt              DateTime @default(now())
+
+  swap               DecodedSwap?        @relation(fields: [swapId], references: [id])
+  pool               Pool                @relation(fields: [poolAddress], references: [address])
+  simulations        Simulation[]
+  executionAttempts  ExecutionAttempt[]
+  paperTrades        PaperTrade[]
+
+  @@index([status])
+  @@index([strategy])
+}
+
+// 5. Deterministic AMM Simulations
+model Simulation {
+  id              String   @id @default(uuid())
+  opportunityId   String
+  positionSizeUsd Float
+  entryAmountIn   String
+  entryAmountOut  String
+  targetImpact    Float
+  exitAmountIn    String
+  exitAmountOut   String
+  grossProfitUsd  Float
+  costUsd         Float
+  netProfitUsd    Float
+  roi             Float
+  priceImpact     Float
+  status          String
+  createdAt       DateTime @default(now())
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+  @@index([opportunityId])
+}
+
+// 6. Execution Attempts (Staging / Simulation / Live)
+model ExecutionAttempt {
+  id             String   @id @default(uuid())
+  opportunityId  String
+  executionMode  String   @default("disabled") // disabled | simulation | staging
+  lockId         String?
+  allocatedSize  Float
+  status         String   // STAGED | COMPLETED | REJECTED | FAILED
+  reason         String?
+  attemptedAt    DateTime @default(now())
+
+  opportunity       Opportunity        @relation(fields: [opportunityId], references: [id])
+  executionResults  ExecutionResult[]
+  transactionRecord TransactionRecord?
+
+  @@index([opportunityId])
+  @@index([status])
+}
+
+// 7. Execution Results & Cost Reconciliation
+model ExecutionResult {
+  id                 String   @id @default(uuid())
+  executionAttemptId String
+  success            Boolean
+  status             String
+  transactionHash    String?
+  blockNumber        BigInt?
+  gasUsed            BigInt?
+  effectiveGasPrice  BigInt?
+  totalFeeUsd        Float?
+  grossProfitUsd     Float?
+  netProfitUsd       Float?
+  latencyMs          Float?
+  revertReason       String?
+  timestamp          DateTime @default(now())
+
+  attempt ExecutionAttempt @relation(fields: [executionAttemptId], references: [id])
+  @@index([transactionHash])
+}
+
+// 8. Transaction Payloads & Validation Records
+model TransactionRecord {
+  id                 String   @id @default(uuid())
+  executionAttemptId String   @unique
+  chainId            Int
+  toAddress          String
+  calldata           String
+  value              String   @default("0")
+  gasLimit           BigInt
+  maxFeePerGas       BigInt?
+  maxPriorityFee     BigInt?
+  valid              Boolean  @default(true)
+  validationErrors   String[]
+  createdAt          DateTime @default(now())
+
+  attempt ExecutionAttempt @relation(fields: [executionAttemptId], references: [id])
+}
+
+// 9. Capital Manager Ledger & Audits
+model CapitalLedger {
+  id              String   @id @default(uuid())
+  opportunityId   String?
+  entryType       String   // RESERVATION | RELEASE | SETTLEMENT_WIN | SETTLEMENT_LOSS | FEE_EXPENDITURE
+  amountUsd       Float
+  balanceAfterUsd Float
+  feesDeductedUsd Float    @default(0)
+  description     String
+  timestamp       DateTime @default(now())
+
+  @@index([entryType])
+}
+
+// 10. Risk & Circuit Breaker Events
+model RiskEvent {
+  id          String   @id @default(uuid())
+  eventType   String   // KILL_SWITCH_TRIPPED | VOLATILITY_SPIKE | STALE_FEED | REVERT_SURGE
+  source      String
+  description String
+  severity    String   @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  timestamp   DateTime @default(now())
+}
+
+// 11. Historical Research Paper Trades
+model PaperTrade {
+  id              String   @id @default(uuid())
+  opportunityId   String
+  symbol          String
+  positionSizeUsd Float
+  grossProfitUsd  Float
+  feesUsd         Float
+  netProfitUsd    Float
+  roi             Float
+  exitStatus      String   // WON | LOST | REVERTED
+  executedAt      DateTime @default(now())
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+}

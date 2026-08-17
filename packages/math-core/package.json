@@ -1,0 +1,26 @@
+{
+  "name": "@base-mev/math-core",
+  "version": "1.0.0",
+  "description": "High-precision EVM AMM math engine based on Degenbot",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/test/*.test.js || tsx --test src/test/*.test.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.13.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

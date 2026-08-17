@@ -1,0 +1,49 @@
+{
+  "name": "base-mev-research",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Research-first MEV platform for Base built on Degenbot low-level primitives",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:api": "npm run dev --workspace=@base-mev/api",
+    "dev:dashboard": "npm run dev --workspace=@base-mev/dashboard",
+    "start:api": "npm run start --workspace=@base-mev/api",
+    "start:dashboard": "npm run start --workspace=@base-mev/dashboard",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "start:mev": "node scripts/start_bread_engine.js",
+    "wrap:eth": "node scripts/wrap_eth_and_approve.js",
+    "micro:sandwich": "node scripts/micro_sandwich.js",
+    "start:atomic": "node scripts/atomic_arbitrage.js",
+    "start:base": "node scripts/base_atomic_sniper.js",
+    "start:bot": "node scripts/telegram_daemon.js",
+    "mev:trade": "node --max-old-space-size=4096 --import tsx scripts/execute_sandwich_trade_live.ts",
+    "mev:onchain": "node --import tsx scripts/broadcast_real_onchain_tx.ts",
+    "report:24h": "tsx scripts/generate_24h_report.ts",
+    "report:multichain": "tsx scripts/run_multichain_reality_test.ts",
+    "test:adversarial": "tsx scripts/run_adversarial_stress_test.ts",
+    "replay:full": "tsx scripts/run_full_population_replay.ts",
+    "lint": "npm run lint --workspaces"
+  },
+  "keywords": [
+    "mev",
+    "base",
+    "degenbot",
+    "research",
+    "simulation",
+    "paper-trading"
+  ],
+  "author": "Antigravity Research Team",
+  "license": "MIT",
+  "devDependencies": {
+    "solc": "^0.8.20"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^2.0.0"
+  }
+}

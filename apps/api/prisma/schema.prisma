@@ -1,0 +1,307 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Token {
+  id          String   @id @default(uuid())
+  chainId     Int
+  address     String   @unique
+  symbol      String
+  name        String
+  decimals    Int
+  createdAt   DateTime @default(now())
+  pools0      Pool[]   @relation("Token0")
+  pools1      Pool[]   @relation("Token1")
+
+  @@index([address])
+  @@index([symbol])
+}
+
+model Pool {
+  id             String         @id @default(uuid())
+  chainId        Int
+  address        String         @unique
+  factoryAddress String
+  protocol       String
+  token0Id       String
+  token1Id       String
+  token0         Token          @relation("Token0", fields: [token0Id], references: [id])
+  token1         Token          @relation("Token1", fields: [token1Id], references: [id])
+  feeNumerator   BigInt
+  feeDenominator BigInt
+  stable         Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  snapshots      PoolSnapshot[]
+  swaps          SwapEvent[]
+  opportunities  Opportunity[]
+
+  @@index([address])
+  @@index([protocol])
+}
+
+model PoolSnapshot {
+  id           String   @id @default(uuid())
+  poolId       String
+  pool         Pool     @relation(fields: [poolId], references: [id])
+  blockNumber  Int
+  reserve0     String
+  reserve1     String
+  sqrtPriceX96 String?
+  tick         Int?
+  liquidity    String?
+  timestamp    DateTime @default(now())
+
+  @@index([poolId])
+  @@index([blockNumber])
+  @@index([timestamp])
+}
+
+model ChainEvent {
+  id                  String   @id @default(uuid())
+  eventId             String   @unique
+  chainId             Int
+  blockNumber         Int
+  transactionHash     String
+  logIndex            Int?
+  sender              String?
+  recipient           String?
+  value               String?
+  inputData           String?
+  gasLimit            String?
+  maxFeePerGas        String?
+  maxPriorityFeePerGas String?
+  observedAt          DateTime
+  source              String
+  status              String
+  createdAt           DateTime @default(now())
+
+  @@index([transactionHash])
+  @@index([blockNumber])
+  @@index([observedAt])
+}
+
+model SwapEvent {
+  id              String   @id @default(uuid())
+  poolId          String
+  pool            Pool     @relation(fields: [poolId], references: [id])
+  transactionHash String
+  blockNumber     Int
+  logIndex        Int
+  sender          String
+  recipient       String
+  amount0In       String
+  amount1In       String
+  amount0Out      String
+  amount1Out      String
+  zeroForOne      Boolean
+  observedAt      DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([transactionHash])
+  @@index([poolId])
+  @@index([observedAt])
+}
+
+model Transaction {
+  id              String   @id @default(uuid())
+  transactionHash String   @unique
+  blockNumber     Int
+  from            String
+  to              String?
+  value           String
+  gasPrice        String?
+  gasUsed         String?
+  timestamp       DateTime
+
+  @@index([transactionHash])
+  @@index([blockNumber])
+}
+
+model Opportunity {
+  id              String       @id @default(uuid())
+  poolId          String
+  pool            Pool         @relation(fields: [poolId], references: [id])
+  targetTxHash    String
+  direction       String
+  exitMode        String
+  targetSizeUsd   Float
+  bestSizeUsd     Float
+  grossProfitUsd  Float
+  costUsd         Float
+  netProfitUsd    Float
+  roi             Float
+  priceImpact     Float
+  riskScore       Float
+  riskLevel       String
+  status          String
+  rejectionReason String?
+  explanation     String?
+  timestamp       DateTime     @default(now())
+  simulations     Simulation[]
+  paperTrade      PaperTrade?
+
+  @@index([poolId])
+  @@index([status])
+  @@index([timestamp])
+  @@index([netProfitUsd])
+}
+
+model Simulation {
+  id              String      @id @default(uuid())
+  opportunityId   String
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id])
+  positionSizeUsd Float
+  entryAmountIn   String
+  entryAmountOut  String
+  exitAmountIn    String
+  exitAmountOut   String
+  grossProfitUsd  Float
+  costUsd         Float
+  netProfitUsd    Float
+  roi             Float
+  priceImpact     Float
+  status          String
+  createdAt       DateTime    @default(now())
+
+  @@index([opportunityId])
+}
+
+model PaperTrade {
+  id             String      @id @default(uuid())
+  opportunityId  String      @unique
+  opportunity    Opportunity @relation(fields: [opportunityId], references: [id])
+  poolAddress    String
+  symbol         String
+  positionSizeUsd Float
+  grossProfitUsd Float
+  feesUsd        Float
+  netProfitUsd   Float
+  roi            Float
+  exitStatus     String
+  timestamp      DateTime    @default(now())
+
+  @@index([timestamp])
+  @@index([poolAddress])
+}
+
+model PaperAccount {
+  id                  String   @id @default(uuid())
+  startingCapitalUsd  Float
+  balanceUsd          Float
+  availableCapitalUsd Float
+  reservedCapitalUsd  Float
+  deployedCapitalUsd  Float
+  realizedGrossPnlUsd Float
+  realizedNetPnlUsd   Float
+  totalFeesPaidUsd    Float
+  totalTrades         Int
+  winningTrades       Int
+  losingTrades        Int
+  maxDrawdownUsd      Float
+  peakBalanceUsd      Float
+  compounding         Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+}
+
+model PnlRecord {
+  id           String   @id @default(uuid())
+  timestamp    DateTime @default(now())
+  balanceUsd   Float
+  grossPnlUsd  Float
+  netPnlUsd    Float
+  feesUsd      Float
+  drawdownUsd  Float
+
+  @@index([timestamp])
+}
+
+model LatencyMetric {
+  id                String   @id @default(uuid())
+  dexName           String?
+  poolAddress       String?
+  tokenSymbol       String?
+  ingestionLatency  Float
+  decodeLatency     Float
+  simulationLatency Float
+  decisionLatency   Float
+  totalLatency      Float
+  timestamp         DateTime @default(now())
+
+  @@index([dexName])
+  @@index([timestamp])
+}
+
+model RiskAssessment {
+  id              String   @id @default(uuid())
+  poolAddress     String
+  score           Float
+  level           String
+  liquidityUsd    Float
+  poolAgeHours    Float
+  volatilityScore Float
+  reasons         String
+  timestamp       DateTime @default(now())
+
+  @@index([poolAddress])
+}
+
+model FeatureVector {
+  id                 String   @id @default(uuid())
+  opportunityId      String
+  tradeSizeUsd       Float
+  liquidityUsd       Float
+  volumeUsd          Float
+  swapFrequency      Float
+  volatility         Float
+  poolAgeHours       Float
+  dex                String
+  priceImpact        Float
+  gasCostUsd         Float
+  latencyMs          Float
+  isProfitable       Boolean
+  netProfitUsd       Float
+  createdAt          DateTime @default(now())
+
+  @@index([opportunityId])
+  @@index([isProfitable])
+}
+
+model ModelPrediction {
+  id              String   @id @default(uuid())
+  opportunityId   String
+  modelName       String
+  predictedNet    Float
+  survivalProb    Float
+  rankedScore     Float
+  createdAt       DateTime @default(now())
+
+  @@index([opportunityId])
+}
+
+model Rejection {
+  id          String   @id @default(uuid())
+  reason      String
+  explanation String?
+  poolAddress String?
+  tokenSymbol String?
+  timestamp   DateTime @default(now())
+
+  @@index([reason])
+  @@index([timestamp])
+}
+
+model SystemEvent {
+  id        String   @id @default(uuid())
+  type      String
+  message   String
+  details   String?
+  timestamp DateTime @default(now())
+
+  @@index([type])
+  @@index([timestamp])
+}

@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #080a0f;
+  --foreground: #e2e8f0;
+  --panel-bg: #0d1117;
+  --panel-border: #1e293b;
+  --card-bg: #111722;
+  --card-border: #1e2638;
+  --accent-cyan: #06b6d4;
+  --accent-green: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-rose: #f43f5e;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: 'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-x: hidden;
+  letter-spacing: -0.01em;
+}
+
+/* Custom terminal scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #090d14;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+.terminal-card {
+  background: #0e131d;
+  border: 1px solid #1a2333;
+  border-radius: 4px;
+}
+
+.terminal-card-interactive {
+  background: #0e131d;
+  border: 1px solid #1a2333;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.terminal-card-interactive:hover {
+  border-color: #2e3d59;
+  background: #111724;
+}
+
+.terminal-panel {
+  background: #0a0e16;
+  border: 1px solid #161f2e;
+}
+
+.terminal-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.4rem;
+  border-radius: 2px;
+}
+
+.glow-cyan {
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.4);
+}
+
+.glow-green {
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.glow-amber {
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.glow-rose {
+  text-shadow: 0 0 8px rgba(244, 63, 94, 0.4);
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

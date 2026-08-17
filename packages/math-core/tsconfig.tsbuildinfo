@@ -1,0 +1,1 @@
+{"root":["./src/cl_math.ts","./src/index.ts","./src/solidly_math.ts","./src/state_delta_validator.ts","./src/types.ts","./src/v2_math.ts","./src/test/math.test.ts","./src/test/state_delta.test.ts"],"version":"5.9.3"}

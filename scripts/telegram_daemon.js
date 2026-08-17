@@ -187,18 +187,51 @@ function startEngine(chatId) {
     if (output.includes('[MOMENTUM SURGE TRIGGERED]')) {
       const match = output.match(/Active Volume Burst in ([A-Za-z0-9_$]+)/);
       if (match) latestAction = `🔥 Volume Surge in *${match[1]}*`;
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `🔥 *[MOMENTUM SURGE DETECTED]* ⚡\n\`\`\`\n${output.trim().slice(0, 300)}\n\`\`\``,
+        parse_mode: 'Markdown'
+      });
     } else if (output.includes('🚀 [NEW BASE LAUNCH DETECTED]')) {
       const match = output.match(/Pair: WETH \/ ([A-Za-z0-9_$]+)/);
       latestAction = `🚀 Sniping *${match ? match[1] : 'TOKEN'}* ($0.11 entry)`;
-      telegramCall('sendMessage', { chat_id: chatId, text: `🚀 *[NEW BASE LAUNCH SNIPED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `🚀 *[NEW BASE LAUNCH SNIPED]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
+        parse_mode: 'Markdown'
+      });
+    } else if (output.includes('[LIVE TRACKER]')) {
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `📊 *[LIVE POSITION UPDATE]*\n\`\`\`\n${output.trim().slice(0, 300)}\n\`\`\``,
+        parse_mode: 'Markdown'
+      });
     } else if (output.includes('🎯 TAKE-PROFIT HIT') || output.includes('🔒 TRAILING PROFIT LOCK')) {
       latestAction = `🏆 Took Profit (+3.5%+) & Swept to USDC!`;
-      telegramCall('sendMessage', { chat_id: chatId, text: `🏆 *[PROFIT SECURED & SWEPT TO USDC]* 💰\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `🏆 *[PROFIT SECURED & SWEPT TO USDC]* 💰\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
+        parse_mode: 'Markdown'
+      });
     } else if (output.includes('🛑 STOP-LOSS EXIT')) {
       latestAction = `🛑 Stop-loss executed safely`;
-      telegramCall('sendMessage', { chat_id: chatId, text: `🛑 *[STOP-LOSS EXIT]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `🛑 *[STOP-LOSS EXIT]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
+        parse_mode: 'Markdown'
+      });
     } else if (output.includes('🏦 [PROFIT VAULT]')) {
-      telegramCall('sendMessage', { chat_id: chatId, text: `🏦 *[USDC VAULT SWEEP]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``, parse_mode: 'Markdown' });
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `🏦 *[USDC VAULT SWEEP]*\n\`\`\`\n${output.trim().slice(0, 350)}\n\`\`\``,
+        parse_mode: 'Markdown'
+      });
+    } else if (output.includes('[HONEYPOT BLOCKED]')) {
+      telegramCall('sendMessage', {
+        chat_id: chatId,
+        text: `🛡️ *[HONEYPOT SHIELD ACTIVATED]*\n\`\`\`\n${output.trim().slice(0, 300)}\n\`\`\`\n💰 *Capital Protected:* $0.00 spent.`,
+        parse_mode: 'Markdown'
+      });
     }
   });
 

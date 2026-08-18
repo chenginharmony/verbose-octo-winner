@@ -427,7 +427,6 @@ async function main() {
         activePositions.delete(tokLower);
         savePersistedPositions(activePositions);
         inFlightTokens.delete(tokLower);
-        GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock
 
         if (netPnlWei > 0n) {
           await sweepProfitToUsdc(netPnlWei);
@@ -435,6 +434,16 @@ async function main() {
         } else {
           telegram.notifyStopLoss(pos.symbol, netGainPercent.toFixed(1), ethers.formatEther(currentEthOut), tx.hash);
         }
+
+        console.log(`\n══════════════════════════════════════════════════════════════════════════`);
+        console.log(`🎉 [TRADE FINISHED] Token: ${pos.symbol} | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% | Return: ${ethers.formatEther(currentEthOut)} ETH`);
+        console.log(`⏳ Entering 5-second trade settlement breather before next search...`);
+        console.log(`══════════════════════════════════════════════════════════════════════════\n`);
+
+        await new Promise(r => setTimeout(r, 5000));
+        GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock only after settlement
+
+        console.log(`📢 [NEXT TRADE ANNOUNCEMENT] Pipeline ready. Searching Base blocks for next high-conviction candidate...`);
       }
     } catch (err) {
       console.log(`⚠️ Exit Warning on ${pos.symbol}: ${err.message}`);

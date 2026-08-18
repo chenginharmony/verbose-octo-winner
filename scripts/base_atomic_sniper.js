@@ -238,7 +238,7 @@ async function main() {
   console.log(`   📍 Address:             ${wallet.address}`);
   console.log(`   💰 Active Trading ETH:  ${ethers.formatEther(initialBalance)} ETH (~$${toUSD(initialBalance)} USD)`);
   console.log(`   🏦 Realized USDC Vault: $${(Number(initUsdcBal) / 1e6).toFixed(4)} USDC`);
-  console.log(`   ⚡ Dynamic Sizing:      DEGEN (~$0.08) | STANDARD (~$0.11) | PRIME (~$0.15)`);
+  console.log(`   ⚡ Dynamic Sizing:      DEGEN (~$${toUSD(SIZING_TIERS.DEGEN)}) | STANDARD (~$${toUSD(SIZING_TIERS.STANDARD)}) | PRIME (~$${toUSD(SIZING_TIERS.PRIME)})`);
   console.log(`   🔒 Anti-Rug Window:     0.10 to 35.0 WETH Liquidity Sweet Spot`);
   console.log(`   🛡️ Honeypot Shield:     GoPlus API + 2-Way Static Simulation (>=70% Return)`);
   console.log(`   🎯 Mode:                Interactive 1-Trade (Halts terminal upon sale)`);

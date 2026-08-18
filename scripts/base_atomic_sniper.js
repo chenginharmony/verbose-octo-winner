@@ -58,11 +58,11 @@ const ERC20_ABI = [
 ];
 
 const SIZING_TIERS = {
-  PRIME: ethers.parseEther('0.0010'),   // ~$1.88 USD
-  STANDARD: ethers.parseEther('0.0010'), // ~$1.88 USD
-  DEGEN: ethers.parseEther('0.0010'), // ~$1.88 USD
+  PRIME: ethers.parseEther('0.00035'),   // ~$0.66 USD
+  STANDARD: ethers.parseEther('0.00035'), // ~$0.66 USD
+  DEGEN: ethers.parseEther('0.00035'), // ~$0.66 USD
 };
-const GAS_RESERVE_ETH = ethers.parseEther('0.0002');
+const GAS_RESERVE_ETH = ethers.parseEther('0.00010');
 
 function toUSD(ethAmount) {
   const eth = typeof ethAmount === 'bigint' ? Number(ethers.formatEther(ethAmount)) : Number(ethAmount);
@@ -344,13 +344,13 @@ async function main() {
       const peakNetWei = peakGrossWei - estimatedGasWei;
       const peakNetGainPercent = (Number(peakNetWei) / Number(pos.entryEth)) * 100;
 
-      // 3. High-Winrate Dynamic Scalp Conditions
-      const shouldTakeProfit = netGainPercent >= 4.0; // Clean +4% take profit (covers fees + gas + solid gain)
-      const shouldTrailingLock = peakNetGainPercent >= 3.0 && netGainPercent <= (peakNetGainPercent - 1.2); // Trailing profit lock
-      const shouldTimeoutFlip = pos.ticksHeld >= 10 && netGainPercent >= 1.0; // 15s quick scalp flip
-      const shouldBreakEvenExit = pos.ticksHeld >= 25 && netGainPercent >= 0.0; // 38s break-even rotation
-      const shouldHardTimeout = pos.ticksHeld >= 40; // 60s max hold - rotate capital
-      const shouldStopLoss = netGainPercent <= -15.0 && pos.ticksHeld >= 6; // -15% stop loss with initial 6-tick noise protection
+      // 3. Ultra-Fast Scalp Conditions (+1.0% profit lock)
+      const shouldTakeProfit = netGainPercent >= 1.0; // Tight +1.0% target for quick wins
+      const shouldTrailingLock = peakNetGainPercent >= 0.8 && netGainPercent <= (peakNetGainPercent - 0.4); // Lock in gains if it starts dropping
+      const shouldTimeoutFlip = pos.ticksHeld >= 6 && netGainPercent >= 0.2; // 9s quick flip
+      const shouldBreakEvenExit = pos.ticksHeld >= 18 && netGainPercent >= 0.0; // 27s break-even rotation
+      const shouldHardTimeout = pos.ticksHeld >= 30; // 45s hard rotation timeout
+      const shouldStopLoss = netGainPercent <= -10.0; // Tight -10% stop loss
 
       if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutFlip || shouldBreakEvenExit || shouldHardTimeout || shouldStopLoss) {
         if (pos.isExiting) return;

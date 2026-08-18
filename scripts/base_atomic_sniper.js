@@ -611,7 +611,35 @@ async function main() {
       const tokenAddr = ethers.getAddress(otherTokenLower);
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 120);
 
-      // 2. Fetch API Data & Score Candidate (Honeypot Shield)
+      // 2. Fetch GoPlus Security Data (Strict Creator Trap & LP Lock Shield)
+      try {
+        const goPlusRes = await fetch(`https://api.gopluslabs.io/api/v1/token_security/8453?contract_addresses=${tokenAddr}`, { signal: AbortSignal.timeout(1500) });
+        if (goPlusRes.ok) {
+          const goData = await goPlusRes.json();
+          const tokenInfo = goData?.result?.[otherTokenLower];
+          if (tokenInfo) {
+            const isHoneypot = tokenInfo.is_honeypot === '1';
+            const cannotSell = tokenInfo.cannot_sell_all === '1';
+            const pausable = tokenInfo.transfer_pausable === '1';
+            const creatorPct = parseFloat(tokenInfo.creator_percent || '0');
+            const holdersCount = parseInt(tokenInfo.holder_count || '0');
+
+            if (isHoneypot || cannotSell || pausable) {
+              rejectCandidate(otherTokenLower, 'sellSim');
+              return;
+            }
+
+            if (creatorPct > 0.85 && holdersCount <= 2) {
+              rejectCandidate(otherTokenLower, 'sellSim');
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        // Continue if API is down, simulation will catch it
+      }
+
+      // 3. Fetch API Data & Score Candidate (Honeypot Shield)
       let apiData = null;
       try {
         const controller = new AbortController();

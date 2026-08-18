@@ -340,9 +340,13 @@ async function main() {
       const netPnlWei = grossPnlWei - estimatedGasWei; // True Net P&L
 
       const netGainPercent = (Number(netPnlWei) / Number(pos.entryEth)) * 100;
+      const grossGainPercent = (Number(grossPnlWei) / Number(pos.entryEth)) * 100;
       const peakGrossWei = (pos.highestObservedEth || pos.entryEth) - pos.entryEth;
       const peakNetWei = peakGrossWei - estimatedGasWei;
       const peakNetGainPercent = (Number(peakNetWei) / Number(pos.entryEth)) * 100;
+
+      // Print Live Monitoring Line
+      console.log(`\n📊 [ACTIVE POSITION] ${pos.symbol} | Held: ${pos.ticksHeld} ticks | Gross P&L: ${grossGainPercent >= 0 ? '+' : ''}${grossGainPercent.toFixed(1)}% | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% | Value: ${ethers.formatEther(currentEthOut)} ETH`);
 
       // 3. Ultra-Fast Scalp Conditions (+1.0% profit lock)
       const shouldTakeProfit = netGainPercent >= 1.0; // Tight +1.0% target for quick wins
@@ -350,7 +354,7 @@ async function main() {
       const shouldTimeoutFlip = pos.ticksHeld >= 6 && netGainPercent >= 0.2; // 9s quick flip
       const shouldBreakEvenExit = pos.ticksHeld >= 18 && netGainPercent >= 0.0; // 27s break-even rotation
       const shouldHardTimeout = pos.ticksHeld >= 30; // 45s hard rotation timeout
-      const shouldStopLoss = netGainPercent <= -10.0; // Tight -10% stop loss
+      const shouldStopLoss = grossGainPercent <= -15.0; // Stop loss based on token price dropping 15%
 
       if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutFlip || shouldBreakEvenExit || shouldHardTimeout || shouldStopLoss) {
         if (pos.isExiting) return;

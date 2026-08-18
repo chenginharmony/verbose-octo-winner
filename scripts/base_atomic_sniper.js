@@ -58,11 +58,11 @@ const ERC20_ABI = [
 ];
 
 const SIZING_TIERS = {
-  PRIME: ethers.parseEther('0.001'),   // ~$1.88 (High Conviction)
-  STANDARD: ethers.parseEther('0.0002'), // ~$0.37 (Normal)
-  DEGEN: ethers.parseEther('0.00006'), // ~$0.11 (High Risk / Sandbox)
+  PRIME: ethers.parseEther('0.00008'),   // ~$0.15 (High Conviction)
+  STANDARD: ethers.parseEther('0.00006'), // ~$0.11 (Normal)
+  DEGEN: ethers.parseEther('0.00004'), // ~$0.08 (Fast Scalp Entry)
 };
-const GAS_RESERVE_ETH = ethers.parseEther('0.000005');
+const GAS_RESERVE_ETH = ethers.parseEther('0.00002');
 
 function toUSD(ethAmount) {
   const eth = typeof ethAmount === 'bigint' ? Number(ethers.formatEther(ethAmount)) : Number(ethAmount);
@@ -133,13 +133,17 @@ function saveSnipedTokens(set) {
   }
 }
 
-const BLOCKED_POSITIONS_FILE = path.join(process.cwd(), 'state', 'blocked_positions.json');
-
 function appendBlockedPosition(pos) {
   try {
     let data = [];
     if (fs.existsSync(BLOCKED_POSITIONS_FILE)) data = JSON.parse(fs.readFileSync(BLOCKED_POSITIONS_FILE, 'utf8'));
-    data.push({ ...pos, blockedAt: Date.now() });
+    data.push({
+      ...pos,
+      entryEth: pos.entryEth ? pos.entryEth.toString() : '0',
+      tokenBalance: pos.tokenBalance ? pos.tokenBalance.toString() : '0',
+      highestObservedEth: pos.highestObservedEth ? pos.highestObservedEth.toString() : '0',
+      blockedAt: Date.now()
+    });
     fs.writeFileSync(BLOCKED_POSITIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
     console.log('Blocked position append notice:', err.message);
@@ -351,22 +355,22 @@ async function main() {
       // Print Live Monitoring Line
       console.log(`\n📊 [ACTIVE POSITION] ${pos.symbol} | Held: ${pos.ticksHeld} ticks | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% (Peak: +${peakNetGainPercent.toFixed(1)}%) | Value: ${ethers.formatEther(currentEthOut)} ETH`);
 
-      // 3. Realistic Dynamic Scalp Conditions (Using NET P&L)
-      const shouldTakeProfit = netGainPercent >= 5.0; // Net profit clears gas + 5%
-      const shouldTrailingLock = peakNetGainPercent >= 4.0 && netGainPercent <= (peakNetGainPercent - 1.5);
-      const shouldTimeoutFlip = pos.ticksHeld >= 6 && netGainPercent >= 1.0;
-      const shouldRotationExit = pos.ticksHeld >= 12; // Free up capital if stagnant
-      const shouldStopLoss = netGainPercent <= -35.0 && pos.ticksHeld >= 8;
+      // 3. Ultra-Fast Scalp Conditions (Flash in, Flash out - NEVER WAIT)
+      const shouldTakeProfit = netGainPercent >= 2.0; // Quick +2% scalp profit
+      const shouldTrailingLock = peakNetGainPercent >= 1.5 && netGainPercent <= (peakNetGainPercent - 0.8);
+      const shouldTimeoutFlip = pos.ticksHeld >= 3 && netGainPercent >= 0.3; // Fast 3-tick (4.5s) flip
+      const shouldRotationExit = pos.ticksHeld >= 6; // Max 6 ticks (~9s) - IMMEDIATE HARD ROTATION EXIT
+      const shouldStopLoss = netGainPercent <= -10.0; // Tight -10% stop loss
 
       if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutFlip || shouldRotationExit || shouldStopLoss) {
         if (pos.isExiting) return;
         pos.isExiting = true;
 
-        const exitLabel = shouldTakeProfit ? `🎯 TAKE-PROFIT HIT (+${netGainPercent.toFixed(1)}%)`
+        const exitLabel = shouldTakeProfit ? `🎯 FAST TAKE-PROFIT (+${netGainPercent.toFixed(1)}%)`
           : shouldTrailingLock ? `🔒 TRAILING PROFIT LOCK (+${netGainPercent.toFixed(1)}%)`
-          : shouldTimeoutFlip ? `⏱️ TIMEOUT PROFIT FLIP (+${netGainPercent.toFixed(1)}%)`
-          : shouldRotationExit ? `🔄 ROTATION EXIT (+${netGainPercent.toFixed(1)}%)`
-          : `🛑 STOP-LOSS EXIT (${netGainPercent.toFixed(1)}%)`;
+          : shouldTimeoutFlip ? `⏱️ TIMEOUT QUICK FLIP (+${netGainPercent.toFixed(1)}%)`
+          : shouldRotationExit ? `⚡ HARD ROTATION EXIT (${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}%)`
+          : `🛑 FAST STOP-LOSS (${netGainPercent.toFixed(1)}%)`;
 
         console.log(`\n────────────────────────────────────────────────────────────────────────────`);
         console.log(`🚨 [BROADCASTING AUTO-EXIT] ${exitLabel} for ${pos.symbol}`);

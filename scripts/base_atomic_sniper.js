@@ -248,29 +248,7 @@ async function main() {
   const approvedTokens = new Set();
   const blockedTokens = getBlockedTokens();
 
-  // Orphan Balance Recovery on Startup (Excluding Blocked/Honeypot Tokens)
-  for (const tokenAddr of lifetimeSnipedTokens) {
-    if (!activePositions.has(tokenAddr) && !blockedTokens.has(tokenAddr.toLowerCase())) {
-      try {
-        const bal = await new ethers.Contract(tokenAddr, ERC20_ABI, provider).balanceOf(wallet.address);
-        if (bal > 0n) {
-          activePositions.set(tokenAddr, {
-            positionId: `${tokenAddr}_recovered_startup`,
-            tokenAddress: ethers.getAddress(tokenAddr),
-            pairAddress: '', // Unknown pair
-            symbol: 'RECOVERED',
-            entryBlock: 0,
-            entryTimestamp: Date.now(),
-            entryEth: SIZING_TIERS.DEGEN,
-            tokenBalance: bal,
-            highestObservedEth: SIZING_TIERS.DEGEN,
-            status: 'OPEN'
-          });
-          console.log(`♻️ Orphan Token Recovered from history: ${tokenAddr}`);
-        }
-      } catch {}
-    }
-  }
+  // Clean state: Only scan and trade brand new tokens created during live session
 
   async function ensureApproval(tokenAddress, symbol) {
     const key = tokenAddress.toLowerCase();
@@ -569,25 +547,12 @@ async function main() {
         return;
       }
 
-      // 🛡️ LOCK CHECK 3: On-Chain Reality Check (Do we already hold this token on-chain?)
+      // 🛡️ LOCK CHECK 3: On-Chain Reality Check (Do we already hold any balance of this token?)
       const tokenContract = new ethers.Contract(meta.otherToken, ERC20_ABI, provider);
       const existingBal = await tokenContract.balanceOf(wallet.address).catch(() => 0n);
       if (existingBal > 0n) {
-        // Automatically adopt existing unmonitored holding
-        activePositions.set(otherTokenLower, {
-          positionId: `${otherTokenLower}_recovered`,
-          tokenAddress: ethers.getAddress(otherTokenLower),
-          pairAddress: pairAddress,
-          symbol: meta.symbol,
-          entryBlock: 0,
-          entryTimestamp: Date.now(),
-          entryEth: SIZING_TIERS.DEGEN,
-          tokenBalance: existingBal,
-          highestObservedEth: SIZING_TIERS.DEGEN,
-          status: 'OPEN'
-        });
-        savePersistedPositions(activePositions);
-        return; // Do NOT enter again!
+        rejectCandidate(otherTokenLower, 'duplicate');
+        return;
       }
 
       // 1. Reserves Query

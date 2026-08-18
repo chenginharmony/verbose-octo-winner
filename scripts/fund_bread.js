@@ -23,7 +23,7 @@ async function main() {
     process.exit(1);
   }
 
-  const provider = new ethers.JsonRpcProvider(RPC, 8453);
+  const provider = new ethers.JsonRpcProvider(RPC, 8453, { staticNetwork: true });
   const wallet = new ethers.Wallet(PK, provider);
   const wethContract = new ethers.Contract(WETH, WETH_ABI, wallet);
 

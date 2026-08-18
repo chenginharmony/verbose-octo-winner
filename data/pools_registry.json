@@ -1,5 +1,5 @@
 {
-  "lastScannedBlock": 50107632,
+  "lastScannedBlock": 50111338,
   "tokens": {
     "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
       "UniswapV2": {
@@ -497,6 +497,117 @@
         "pairAddr": "0xFc40fd1Ea93a32A3de6837d95b21c0b3e1123575",
         "isWeth0": false,
         "symbol": "CLANKER"
+      }
+    },
+    "0x3722264ab15a1dfce5a5af89e6547f7949a8aba3": {
+      "Aerodrome": {
+        "pairAddr": "0x4B839315bF5B8D192Ee803118fB3A1b89784f4Fb",
+        "isWeth0": false,
+        "symbol": "LFI"
+      }
+    },
+    "0xc52aedec3374422d7510e294cfaa90799595cba3": {
+      "Aerodrome": {
+        "pairAddr": "0x6D3103b53C72d0FAa460aE93eDE750a361758fd5",
+        "isWeth0": true,
+        "symbol": "Surplus"
+      }
+    },
+    "0x3e12b9d6a4d12cd9b4a6d613872d0eb32f68b380": {
+      "UniswapV2": {
+        "pairAddr": "0x45ddcF2cEbcC4d9FA46d0C5d579F17DaDFe96C6E",
+        "isWeth0": false,
+        "symbol": "FLOWER"
+      }
+    },
+    "0x58e5ef4742c9359c6a1bed62aded87e2b227b25f": {
+      "UniswapV2": {
+        "pairAddr": "0x08c0A17F5E932A07235d6866a943FCd70343887A",
+        "isWeth0": true,
+        "symbol": "openhuman"
+      }
+    },
+    "0xa4167e378fd05b04b5f89d09e87bea70a43b537c": {
+      "UniswapV2": {
+        "pairAddr": "0xf243AFA09ed45209e1E0082CC4124Dc444003c2A",
+        "isWeth0": true,
+        "symbol": "PEPKING"
+      }
+    },
+    "0x5e48dde8249ef5cf36246d7059597fb6b16c9a2a": {
+      "UniswapV2": {
+        "pairAddr": "0x9C7bD97d23A9853Cd95529e652444dADc38448BD",
+        "isWeth0": true,
+        "symbol": "SPCX"
+      }
+    },
+    "0x1111111111166b7fe7bd91427724b487980afc69": {
+      "UniswapV2": {
+        "pairAddr": "0x4DC3E4b87B48c56fEbe726cd6f03ae79bA641ADf",
+        "isWeth0": false,
+        "symbol": "ZORA"
+      },
+      "Aerodrome": {
+        "pairAddr": "0x84e6bEA6Efe00399B6697fE9BE3D303FCf3F4f8e",
+        "isWeth0": false,
+        "symbol": "ZORA"
+      },
+      "AlienBase": {
+        "pairAddr": "0x58E185b080eA47b8AD617A3F3cf9283Ea35E8eF0",
+        "isWeth0": false,
+        "symbol": "ZORA"
+      }
+    },
+    "0xb3b32f9f8827d4634fe7d973fa1034ec9fddb3b3": {
+      "UniswapV2": {
+        "pairAddr": "0xc623825405De960713F53485e2536b849615ca12",
+        "isWeth0": true,
+        "symbol": "B3"
+      },
+      "Aerodrome": {
+        "pairAddr": "0xFB96bb79ba9eFD542FeAcfd047Ebb2e1d2b36AE5",
+        "isWeth0": true,
+        "symbol": "B3"
+      },
+      "AlienBase": {
+        "pairAddr": "0x4C1453376952F899365d295c716aaA1010B8FEaa",
+        "isWeth0": true,
+        "symbol": "B3"
+      }
+    },
+    "0x19c95c0a66248e9a2a95ba8a747e9678853b93e6": {
+      "UniswapV2": {
+        "pairAddr": "0x1b9d62D6Ea7cA89FDe25b5620145c2ADeb3e0080",
+        "isWeth0": false,
+        "symbol": "SPCX"
+      }
+    },
+    "0x2015d4d1000e9d438c85af2e18a1e203c815abee": {
+      "UniswapV2": {
+        "pairAddr": "0x41aa44688B88fdD06c1003eEBCb57886A56C996B",
+        "isWeth0": false,
+        "symbol": "TREX"
+      }
+    },
+    "0xb5cd65b6f27d29311728990957ff6fd878f5d1b7": {
+      "UniswapV2": {
+        "pairAddr": "0xcd8852EE310611587BCce3F0F0f1CEB2e04cA02A",
+        "isWeth0": true,
+        "symbol": "LIQUIDBGT"
+      }
+    },
+    "0xa36a85fd741fb3b1ff8b436d0d990d8255f9f220": {
+      "UniswapV2": {
+        "pairAddr": "0x462e67c3b972Ee0c7395F8CDc26411a197C680D1",
+        "isWeth0": true,
+        "symbol": "TREX"
+      }
+    },
+    "0x6b072947e587b1d464a0fb7670bd4aef9fa5d4ce": {
+      "UniswapV2": {
+        "pairAddr": "0xFe24868BFaC6881c64f70deA8E71F617a8e11bF7",
+        "isWeth0": true,
+        "symbol": "SPCX"
       }
     }
   }

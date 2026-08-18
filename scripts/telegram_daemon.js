@@ -113,7 +113,7 @@ async function getStats() {
     usdcBal: (Number(usdcBal) / 1e6).toFixed(2),
     breadBal: Number(ethers.formatEther(breadBal)).toFixed(5),
     breadUSD: (Number(ethers.formatEther(breadBal)) * 2500).toFixed(2),
-    status: isEngineRunning ? '🟢 SCANNING 3 DEXs' : '🔴 STOPPED (STANDBY)'
+    status: isEngineRunning ? '🟢 SCANNING 5 DEXs' : '🔴 STOPPED (STANDBY)'
   };
 }
 
@@ -133,7 +133,7 @@ async function startLiveRadar(chatId) {
   const stats = await getStats();
   const initialText = `🍣 *ATOMIC ARB PRO LIVE RADAR ⚡*\n────────────────────────────\n` +
     `📡 *Base Block:* #Initializing...\n` +
-    `🔄 *Status:* 🟢 DEX Cross-Scanner Active\n` +
+    `🔄 *Status:* 🟢 5-DEX Cross-Scanner Active\n` +
     `🛡️ *Atomic Shield:* Execution fully protected via Bread.sol\n` +
     `💰 *Gas Wallet:* \`${stats.ethBal} ETH\` (~$${stats.ethUSD} USD)\n` +
     `🍞 *Arb Bankroll:* \`${stats.breadBal} WETH\` (~$${stats.breadUSD} USD)\n` +
@@ -173,7 +173,7 @@ async function startLiveRadar(chatId) {
         `💰 *Gas Wallet:* \`${curStats.ethBal} ETH\` (~$${curStats.ethUSD} USD)\n` +
         `🍞 *Arb Bankroll:* \`${curStats.breadBal} WETH\` (~$${curStats.breadUSD} USD)\n` +
         `🏦 *USDC Vault:* \`$${curStats.usdcBal} USDC\` (Locked Profit)\n` +
-        `🛡️ *Routing:* BaseSwap ↔️ SwapBased ↔️ AlienBase\n` +
+        `🛡️ *Routing:* UniswapV2 ↔️ Aerodrome ↔️ SushiSwap ↔️ BaseSwap ↔️ AlienBase\n` +
         `────────────────────────────\n` +
         `⚡ *Status:* ${curStats.status}`;
 

@@ -133,6 +133,8 @@ function saveSnipedTokens(set) {
   }
 }
 
+const BLOCKED_POSITIONS_FILE = path.join(process.cwd(), 'state', 'blocked_positions.json');
+
 function appendBlockedPosition(pos) {
   try {
     let data = [];
@@ -200,11 +202,21 @@ const telemetry = {
   }
 };
 
+function getBlockedTokens() {
+  try {
+    if (fs.existsSync(BLOCKED_POSITIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(BLOCKED_POSITIONS_FILE, 'utf8'));
+      return new Set(data.map(p => (p.tokenAddress || '').toLowerCase()));
+    }
+  } catch {}
+  return new Set();
+}
+
 async function main() {
   console.clear();
   console.log('╔══════════════════════════════════════════════════════════════════════════╗');
   console.log('║       ⚡ PRO ASYNC BASE MEV SNIPER & AUTONOMOUS POSITION ENGINE (8453)   ║');
-  console.log('║       Ground Truth: On-Chain Balances + In-Flight Locks + Net P&L Exit   ║');
+  console.log('║       Mode: 🎯 INTERACTIVE 1-TRADE-AT-A-TIME (Auto-Exit & Pause)         ║');
   console.log('╚══════════════════════════════════════════════════════════════════════════╝\n');
 
   if (!PK) {
@@ -226,17 +238,19 @@ async function main() {
   console.log(`   📍 Address:             ${wallet.address}`);
   console.log(`   💰 Active Trading ETH:  ${ethers.formatEther(initialBalance)} ETH (~$${toUSD(initialBalance)} USD)`);
   console.log(`   🏦 Realized USDC Vault: $${(Number(initUsdcBal) / 1e6).toFixed(4)} USDC`);
-  console.log(`   ⚡ Dynamic Sizing:      DEGEN (~$0.11) | STANDARD (~$0.37) | PRIME (~$1.88)`);
-  console.log(`   🔒 Anti-Rug Window:     0.05 to 300.0 WETH Liquidity Sweet Spot`);
-  console.log(`   🛡️ Honeypot Shield:     2-Way Pre-Flight Static Simulation (>=70% Return)`);
+  console.log(`   ⚡ Dynamic Sizing:      DEGEN (~$0.08) | STANDARD (~$0.11) | PRIME (~$0.15)`);
+  console.log(`   🔒 Anti-Rug Window:     0.10 to 35.0 WETH Liquidity Sweet Spot`);
+  console.log(`   🛡️ Honeypot Shield:     GoPlus API + 2-Way Static Simulation (>=70% Return)`);
+  console.log(`   🎯 Mode:                Interactive 1-Trade (Halts terminal upon sale)`);
   console.log('────────────────────────────────────────────────────────────────────────────\n');
 
   const activePositions = loadPersistedPositions();
   const approvedTokens = new Set();
+  const blockedTokens = getBlockedTokens();
 
-  // Orphan Balance Recovery on Startup
+  // Orphan Balance Recovery on Startup (Excluding Blocked/Honeypot Tokens)
   for (const tokenAddr of lifetimeSnipedTokens) {
-    if (!activePositions.has(tokenAddr)) {
+    if (!activePositions.has(tokenAddr) && !blockedTokens.has(tokenAddr.toLowerCase())) {
       try {
         const bal = await new ethers.Contract(tokenAddr, ERC20_ABI, provider).balanceOf(wallet.address);
         if (bal > 0n) {
@@ -247,7 +261,7 @@ async function main() {
             symbol: 'RECOVERED',
             entryBlock: 0,
             entryTimestamp: Date.now(),
-            entryEth: SIZING_TIERS.DEGEN, // Placeholders for exit monitor math
+            entryEth: SIZING_TIERS.DEGEN,
             tokenBalance: bal,
             highestObservedEth: SIZING_TIERS.DEGEN,
             status: 'OPEN'
@@ -405,6 +419,12 @@ async function main() {
             activePositions.delete(tokLower);
             savePersistedPositions(activePositions);
             inFlightTokens.delete(tokLower);
+
+            console.log(`\n══════════════════════════════════════════════════════════════════════════`);
+            console.log(`🛑 [INTERACTIVE HALT] Un-sellable token caught safely by circuit breaker (zero gas spent).`);
+            console.log(`💬 Check your AI Assistant chat to review and approve the next candidate.`);
+            console.log(`══════════════════════════════════════════════════════════════════════════\n`);
+            process.exit(0);
           }
           return;
         }
@@ -435,14 +455,12 @@ async function main() {
         }
 
         console.log(`\n══════════════════════════════════════════════════════════════════════════`);
-        console.log(`🎉 [TRADE FINISHED] Token: ${pos.symbol} | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% | Return: ${ethers.formatEther(currentEthOut)} ETH`);
-        console.log(`⏳ Entering 5-second trade settlement breather before next search...`);
+        console.log(`🎉 [TRADE FINISHED] Token: ${pos.symbol} | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% | Return: ${ethers.formatEther(currentEthOut)} ETH (~$${toUSD(currentEthOut)} USD)`);
+        console.log(`🛑 [INTERACTIVE TRADE HALT] Single-trade cycle completed! Process stopped.`);
+        console.log(`💬 Check your AI Assistant chat to review trade outcome and start the next trade.`);
         console.log(`══════════════════════════════════════════════════════════════════════════\n`);
 
-        await new Promise(r => setTimeout(r, 5000));
-        GLOBAL_TRADE_LOCK = false; // 🔓 Release Global Trade Lock only after settlement
-
-        console.log(`📢 [NEXT TRADE ANNOUNCEMENT] Pipeline ready. Searching Base blocks for next high-conviction candidate...`);
+        process.exit(0);
       }
     } catch (err) {
       console.log(`⚠️ Exit Warning on ${pos.symbol}: ${err.message}`);

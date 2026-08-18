@@ -216,12 +216,15 @@ async function main() {
     const victimTokenOut = meta.wethIsToken0 ? amount1Out : amount0Out;
     const preOtherRes = currentOtherRes + victimTokenOut;
 
-    // 4. Calculate Frontrun Capital Available
+    // 4. Calculate Frontrun Capital Available (Strictly Capped to Micro Trades)
     const ethBal = await provider.getBalance(wallet.address);
     if (ethBal < GAS_RESERVE_ETH + GAS_COST_WEI) return;
 
     const deployable = ethBal - GAS_RESERVE_ETH;
-    const frontrunWei = (deployable * 70n) / 100n; // Use 70% of deployable balance
+    const rawFrontrun = (deployable * 70n) / 100n;
+    const maxMicroFrontrun = ethers.parseEther('0.00015'); // Max ~$0.28 USD small trade cap
+    const minMicroFrontrun = ethers.parseEther('0.00003'); // Min ~$0.05 USD small trade floor
+    const frontrunWei = rawFrontrun > maxMicroFrontrun ? maxMicroFrontrun : (rawFrontrun < minMicroFrontrun ? minMicroFrontrun : rawFrontrun);
 
     // 5. Evaluate Sandwich Profitability
     const { net, gross, tokenBought, ethBack } = calcSandwichNet(

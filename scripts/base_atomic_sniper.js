@@ -352,25 +352,24 @@ async function main() {
       const peakNetWei = peakGrossWei - estimatedGasWei;
       const peakNetGainPercent = (Number(peakNetWei) / Number(pos.entryEth)) * 100;
 
-      // Print Live Monitoring Line
-      console.log(`\n📊 [ACTIVE POSITION] ${pos.symbol} | Held: ${pos.ticksHeld} ticks | Net P&L: ${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}% (Peak: +${peakNetGainPercent.toFixed(1)}%) | Value: ${ethers.formatEther(currentEthOut)} ETH`);
+      // 3. High-Winrate Dynamic Scalp Conditions
+      const shouldTakeProfit = netGainPercent >= 4.0; // Clean +4% take profit (covers fees + gas + solid gain)
+      const shouldTrailingLock = peakNetGainPercent >= 3.0 && netGainPercent <= (peakNetGainPercent - 1.2); // Trailing profit lock
+      const shouldTimeoutFlip = pos.ticksHeld >= 10 && netGainPercent >= 1.0; // 15s quick scalp flip
+      const shouldBreakEvenExit = pos.ticksHeld >= 25 && netGainPercent >= 0.0; // 38s break-even rotation
+      const shouldHardTimeout = pos.ticksHeld >= 40; // 60s max hold - rotate capital
+      const shouldStopLoss = netGainPercent <= -15.0 && pos.ticksHeld >= 6; // -15% stop loss with initial 6-tick noise protection
 
-      // 3. Ultra-Fast Scalp Conditions (Flash in, Flash out - NEVER WAIT)
-      const shouldTakeProfit = netGainPercent >= 2.0; // Quick +2% scalp profit
-      const shouldTrailingLock = peakNetGainPercent >= 1.5 && netGainPercent <= (peakNetGainPercent - 0.8);
-      const shouldTimeoutFlip = pos.ticksHeld >= 3 && netGainPercent >= 0.3; // Fast 3-tick (4.5s) flip
-      const shouldRotationExit = pos.ticksHeld >= 6; // Max 6 ticks (~9s) - IMMEDIATE HARD ROTATION EXIT
-      const shouldStopLoss = netGainPercent <= -10.0; // Tight -10% stop loss
-
-      if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutFlip || shouldRotationExit || shouldStopLoss) {
+      if (shouldTakeProfit || shouldTrailingLock || shouldTimeoutFlip || shouldBreakEvenExit || shouldHardTimeout || shouldStopLoss) {
         if (pos.isExiting) return;
         pos.isExiting = true;
 
-        const exitLabel = shouldTakeProfit ? `🎯 FAST TAKE-PROFIT (+${netGainPercent.toFixed(1)}%)`
+        const exitLabel = shouldTakeProfit ? `🎯 TAKE-PROFIT (+${netGainPercent.toFixed(1)}%)`
           : shouldTrailingLock ? `🔒 TRAILING PROFIT LOCK (+${netGainPercent.toFixed(1)}%)`
           : shouldTimeoutFlip ? `⏱️ TIMEOUT QUICK FLIP (+${netGainPercent.toFixed(1)}%)`
-          : shouldRotationExit ? `⚡ HARD ROTATION EXIT (${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}%)`
-          : `🛑 FAST STOP-LOSS (${netGainPercent.toFixed(1)}%)`;
+          : shouldBreakEvenExit ? `🔄 BREAK-EVEN ROTATION (+${netGainPercent.toFixed(1)}%)`
+          : shouldHardTimeout ? `⏱️ 60s MAX-HOLD ROTATION (${netGainPercent >= 0 ? '+' : ''}${netGainPercent.toFixed(1)}%)`
+          : `🛑 STOP-LOSS (${netGainPercent.toFixed(1)}%)`;
 
         console.log(`\n────────────────────────────────────────────────────────────────────────────`);
         console.log(`🚨 [BROADCASTING AUTO-EXIT] ${exitLabel} for ${pos.symbol}`);
@@ -585,7 +584,7 @@ async function main() {
       }
 
       const wethReserve = meta.isWeth0 ? r0 : r1;
-      if (wethReserve < ethers.parseEther('0.05') || wethReserve > ethers.parseEther('300.0')) {
+      if (wethReserve < ethers.parseEther('0.10') || wethReserve > ethers.parseEther('35.0')) {
         rejectCandidate(otherTokenLower, 'liquidity');
         return;
       }

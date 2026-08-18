@@ -58,11 +58,11 @@ const ERC20_ABI = [
 ];
 
 const SIZING_TIERS = {
-  PRIME: ethers.parseEther('0.0016'),   // ~$3.00 USD
-  STANDARD: ethers.parseEther('0.0016'), // ~$3.00 USD
-  DEGEN: ethers.parseEther('0.0016'), // ~$3.00 USD
+  PRIME: ethers.parseEther('0.0010'),   // ~$1.88 USD
+  STANDARD: ethers.parseEther('0.0010'), // ~$1.88 USD
+  DEGEN: ethers.parseEther('0.0010'), // ~$1.88 USD
 };
-const GAS_RESERVE_ETH = ethers.parseEther('0.0003');
+const GAS_RESERVE_ETH = ethers.parseEther('0.0002');
 
 function toUSD(ethAmount) {
   const eth = typeof ethAmount === 'bigint' ? Number(ethers.formatEther(ethAmount)) : Number(ethAmount);
